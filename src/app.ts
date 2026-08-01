@@ -15,7 +15,7 @@ import { z } from 'zod'
 import { ask } from './ai/ask.js'
 import { smartCapture } from './ai/extract.js'
 import { AiUnavailable, aiEnabled } from './ai/llm.js'
-import { researchEnabled } from './ai/research.js'
+import { researchEnabled, researchMode } from './ai/research.js'
 import { catchUpEntry, shelfQueue } from './core/catchup.js'
 import { embeddingsConfigured } from './embeddings/provider.js'
 import { status as embeddingStatus } from './embeddings/store.js'
@@ -47,7 +47,7 @@ export function createApp(): Hono {
       ai: aiEnabled(),
       telegram: telegramEnabled(),
       embeddings: embeddingsConfigured(),
-      research: researchEnabled(),
+      research: researchMode(),
     }),
   )
 

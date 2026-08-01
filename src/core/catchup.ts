@@ -16,7 +16,8 @@
  *   3. **Your words stay yours.** Research notes carry source='research' so
  *      they are never mistaken for something you thought.
  */
-import { research, researchEnabled } from '../ai/research.js'
+import { chat } from '../ai/llm.js'
+import { exaSearch, research, researchMode } from '../ai/research.js'
 import { q, q1 } from '../db.js'
 import { fetchLinkMeta } from './enrich.js'
 import { type Entry, addNote, getEntry } from './flow.js'
@@ -66,6 +67,79 @@ function prompt(entry: Entry, since: string, page: { title?: string; description
   ].join('\n')
 }
 
+/** What to actually type into a search box for this entry. */
+function searchQuery(entry: Entry): string {
+  const site = typeof entry.data?.source === 'string' ? entry.data.source : null
+  // The site name ("DFNS") beats a page title ("Colossus — Overview"), which
+  // is about a page rather than about the company.
+  const subject = site ?? entry.title ?? ''
+  let domain = ''
+  try {
+    if (typeof entry.data?.url === 'string') domain = new URL(entry.data.url).hostname.replace(/^www\./, '')
+  } catch {
+    /* not a usable url */
+  }
+  return [subject, domain, 'news funding launch acquisition'].filter(Boolean).join(' ')
+}
+
+/**
+ * Retrieval path: Exa finds documents published since the last check, and our
+ * own model turns them into a note. The date window is enforced by the index,
+ * so the model is only ever summarising things that are genuinely new.
+ */
+async function retrieveAndSummarise(
+  entry: Entry & { notes?: { body: string; source: string }[] },
+  since: string,
+  page: { title?: string; description?: string } | null,
+): Promise<{ text: string; citations: string[] } | undefined> {
+  const docs = await exaSearch({ query: searchQuery(entry), since, numResults: 8 })
+  if (!docs.length) return undefined
+
+  // Repeat sweeps re-find the same articles, so tell the model what it has
+  // already recorded rather than writing the same note again.
+  const already = (entry.notes ?? [])
+    .filter((n) => n.source === 'research')
+    .slice(-3)
+    .map((n) => n.body.split('\n\nSources:')[0])
+    .join('\n')
+
+  const context = docs
+    .map((d) => `- ${d.title} (${d.published?.slice(0, 10) ?? 'undated'})\n  ${d.url}\n  ${d.highlights.slice(0, 2).join(' … ')}`)
+    .join('\n')
+
+  const text = await chat({
+    system: [
+      'You summarise what has newly happened to something the user is tracking, using only the',
+      'search results given. They are already filtered to items published after the last check.',
+      '',
+      'Rules:',
+      `- If nothing here is materially new or notable, reply with exactly ${NOTHING} and nothing else.`,
+      '- At most three short sentences. Lead with the most significant item. Always include dates.',
+      '- Cite with the URL in brackets after the claim it supports.',
+      '- Concrete developments only: funding, launches, partnerships, acquisitions, shutdowns,',
+      '  pivots, leadership changes. Ignore SEO filler, listicles and undated pages.',
+      '- Never repeat anything under "already recorded".',
+      '- Do not restate what the thing is. The user knows; they saved it.',
+    ].join('\n'),
+    user: [
+      `Tracking: ${entry.title ?? 'unknown'}${entry.data?.url ? ` (${String(entry.data.url)})` : ''}`,
+      entry.data?.summary ? `Known as: ${String(entry.data.summary)}` : '',
+      page?.description && page.description !== entry.data?.summary ? `Its page now says: ${page.description}` : '',
+      already ? `\nAlready recorded:\n${already}` : '',
+      `\nSearch results since ${since.slice(0, 10)}:\n${context}`,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  })
+
+  const trimmed = text.trim()
+  if (!trimmed || trimmed.toUpperCase().startsWith(NOTHING)) return undefined
+
+  // Only credit sources the summary actually used.
+  const cited = docs.filter((d) => trimmed.includes(d.url)).map((d) => d.url)
+  return { text: trimmed, citations: cited.length ? cited : docs.slice(0, 3).map((d) => d.url) }
+}
+
 /** Checks one entry. Never throws for ordinary failures — returns what it learned. */
 export async function catchUpEntry(entryId: string): Promise<CatchUpResult> {
   const entry = await getEntry(entryId)
@@ -88,7 +162,17 @@ export async function catchUpEntry(entryId: string): Promise<CatchUpResult> {
   let citations: string[] | undefined
   let skipped: string | undefined
 
-  if (researchEnabled()) {
+  const mode = researchMode()
+
+  if (mode === 'exa') {
+    try {
+      const found = await retrieveAndSummarise(entry, since, page)
+      noteBody = found?.text
+      citations = found?.citations
+    } catch (err) {
+      skipped = err instanceof Error ? err.message : String(err)
+    }
+  } else if (mode === 'agentic') {
     try {
       const found = await research(prompt(entry, since, page))
       const text = found?.text?.trim()

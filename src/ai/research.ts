@@ -17,6 +17,82 @@ export interface ResearchResult {
   citations: string[]
 }
 
+export interface ResearchDoc {
+  title: string
+  url: string
+  published?: string
+  highlights: string[]
+}
+
+/**
+ * Two shapes, because they are genuinely different tools.
+ *
+ *   agentic    you ask a question, the model decides what to search
+ *              (xAI / OpenAI hosted web_search). Thorough, ~30s.
+ *   retrieval  you specify the query and the filters, and summarise the
+ *              results yourself (Exa). ~1s, and the date window is a hard
+ *              constraint rather than a request the model may ignore.
+ *
+ * Catch-up is entirely "what happened *since I last looked*", so retrieval is
+ * the better fit where available: the date filter is enforced at the source.
+ */
+export type ResearchMode = 'exa' | 'agentic' | null
+
+export function researchMode(): ResearchMode {
+  const forced = process.env.FLOW_RESEARCH?.toLowerCase()
+  if (forced === 'off') return null
+  if (forced === 'exa') return process.env.EXA_API_KEY ? 'exa' : null
+  if (forced === 'agentic' || forced === 'on') return apiKey() ? 'agentic' : null
+  if (process.env.EXA_API_KEY) return 'exa'
+  return apiKey() && /(^|\/\/)(api\.)?(x\.ai|openai\.com)/.test(baseUrl()) ? 'agentic' : null
+}
+
+/**
+ * Exa search. `since` becomes startPublishedDate, which is the whole reason to
+ * prefer this for catch-up — "only things published after I last checked" is
+ * applied by the index, not hoped for in a prompt.
+ */
+export async function exaSearch(opts: {
+  query: string
+  since?: string | null
+  numResults?: number
+  category?: string
+  timeoutMs?: number
+}): Promise<ResearchDoc[]> {
+  const key = process.env.EXA_API_KEY
+  if (!key) return []
+
+  const res = await fetch('https://api.exa.ai/search', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      query: opts.query,
+      type: process.env.EXA_SEARCH_TYPE ?? 'auto',
+      numResults: opts.numResults ?? 8,
+      ...(opts.since ? { startPublishedDate: opts.since } : {}),
+      ...(opts.category ? { category: opts.category } : {}),
+      contents: { highlights: true },
+    }),
+    signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),
+  })
+
+  const json = (await res.json().catch(() => null)) as {
+    results?: { title?: string; url?: string; publishedDate?: string; highlights?: string[] }[]
+    error?: string
+  } | null
+
+  if (!res.ok || !json) throw new Error(`exa search failed (${res.status}): ${json?.error ?? res.statusText}`)
+
+  return (json.results ?? [])
+    .filter((r) => r.url)
+    .map((r) => ({
+      title: r.title ?? r.url!,
+      url: r.url!,
+      published: r.publishedDate,
+      highlights: (r.highlights ?? []).map((h) => h.replace(/\s+/g, ' ').trim()).filter(Boolean),
+    }))
+}
+
 function baseUrl(): string {
   return (process.env.FLOW_RESEARCH_URL ?? process.env.FLOW_LLM_URL ?? 'https://api.x.ai/v1').replace(/\/$/, '')
 }
@@ -35,11 +111,7 @@ function model(): string {
  * FLOW_RESEARCH=on to force it for an endpoint not listed here.
  */
 export function researchEnabled(): boolean {
-  if (!apiKey()) return false
-  const forced = process.env.FLOW_RESEARCH?.toLowerCase()
-  if (forced === 'off') return false
-  if (forced === 'on') return true
-  return /(^|\/\/)(api\.)?(x\.ai|openai\.com)/.test(baseUrl())
+  return researchMode() !== null
 }
 
 /**

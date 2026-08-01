@@ -235,6 +235,47 @@ key and no network.
 
 ---
 
+## Catch up — what changed out there
+
+Shelve a few links, come back in a month, and ask *what's up with these guys?* flow looks each
+one up and appends what it finds as a **dated, sourced note**.
+
+```bash
+npm run flow -- catchup goodmoney      # sweep a shelf, oldest-checked first
+```
+
+In the web app a shelf shows how long since it was caught up, a staleness pill per link, and a
+*catch me up* button. Over MCP it is `flow_catch_up`.
+
+**It is append-only, and that is the whole design.** Nothing here rewrites a title, body, tag or
+shelf. Where something sits is your judgement about what it is *to you*, and a web search does
+not get to overrule that — a pivot or acquisition is reported in the note for you to act on.
+Equally, "nothing happened" writes no note at all; a memory full of *nothing changed* is worse
+than one that stays quiet.
+
+Research notes carry `source='research'` and render distinctly, so in a year you can still tell
+which thoughts were yours.
+
+### Two research shapes
+
+| | how | speed | date window |
+| --- | --- | --- | --- |
+| **retrieval** (`EXA_API_KEY`) | Exa returns documents, your own model summarises them | ~15s | **enforced by the index** |
+| **agentic** (xAI / OpenAI) | hosted `web_search`, the model drives | ~35s | asked for in the prompt |
+| none | re-reads the page and reports what moved | ~1s | n/a |
+
+Retrieval wins for this job because catch-up is entirely *"since I last looked"*.
+`startPublishedDate` makes that a hard constraint rather than an instruction a model may
+quietly ignore. On the same entry it was both faster and better — it caught a company's pivot
+that the agentic search missed.
+
+Exa is selected automatically when `EXA_API_KEY` is present; `FLOW_RESEARCH=exa|agentic|off`
+overrides. With neither key, catch-up still works by re-reading the page.
+
+Repeat sweeps are told what has already been recorded, so they do not write the same note twice.
+
+---
+
 ## Running it entirely locally
 
 No cloud, no keys, nothing leaving your machine. Reasonable for a store that holds your life.
