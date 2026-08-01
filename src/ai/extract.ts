@@ -113,7 +113,11 @@ export async function smartCapture(
   source = 'ai',
   captureId?: string | null,
 ): Promise<SmartCaptureResult> {
-  const input = text.trim()
+  // Lift hashtags before the model sees the text: they are the user's explicit
+  // filing instruction and shouldn't depend on the model noticing them. They
+  // apply to every entry the dump produces.
+  const { text: cleaned, tags: typedTags } = flow.extractHashtags(text)
+  const input = (cleaned ?? '').trim()
   if (!input) throw new Error('Nothing to capture.')
 
   const { entries: extracted } = await chatJson<{ entries: ExtractedEntry[] }>({
@@ -127,6 +131,7 @@ export async function smartCapture(
     const { entry } = await flow.capture({
       kind: 'thought',
       body: input,
+      tags: typedTags,
       source,
       capture_id: captureId ? `${captureId}#0` : null,
     })
@@ -144,7 +149,7 @@ export async function smartCapture(
       title: e.title,
       body: e.body,
       data,
-      tags: e.tags,
+      tags: [...(e.tags ?? []), ...typedTags],
       status: e.status,
       rating: e.rating,
       occurred_at: e.occurred_at,

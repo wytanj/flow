@@ -87,6 +87,34 @@ function cleanTags(tags?: string[] | null): string[] {
 }
 
 /**
+ * Pulls `#shelf/sub` and `#tag` out of typed text and returns the text without
+ * them. Deterministic on purpose: tagging is too load-bearing to leave to a
+ * model's judgement, and this costs nothing.
+ *
+ * Separators, and why:
+ *   `/`  nests    — ai/harness sits under ai
+ *   ` `  divides  — #ai/harness #mcp are two independent tags
+ *   `-`  literal  — open-source is one shelf, not open > source
+ *
+ * A hyphen cannot double as a delimiter because it already appears inside real
+ * names (open-source, ai-harness, self-custody), which makes #a-b-c genuinely
+ * ambiguous and, worse, silently so.
+ *
+ * The `#` must follow whitespace or start the string, so URL fragments
+ * (…/page#section) are never mistaken for tags.
+ */
+export function extractHashtags(text: string | null | undefined): { text: string | null; tags: string[] } {
+  if (!text) return { text: text ?? null, tags: [] }
+  const tags: string[] = []
+  const stripped = text.replace(/(^|\s)#([\p{L}\p{N}][\p{L}\p{N}/_-]*)/gu, (_m, lead: string, tag: string) => {
+    tags.push(tag)
+    return lead
+  })
+  const cleaned = stripped.replace(/[ \t]{2,}/g, ' ').replace(/\s+$/gm, '').trim()
+  return { text: cleaned || null, tags }
+}
+
+/**
  * SQL matching a shelf and everything under it. `starts_with` rather than LIKE
  * so tags containing `%` or `_` need no escaping.
  */
@@ -140,11 +168,14 @@ export async function capture(input: CaptureInput): Promise<CaptureResult> {
   }
 
   let kind = normalizeKind(input.kind)
-  let body = input.body?.trim() || null
+  // hashtags typed into the text are tags, not content — lift them out before
+  // the body is used for anything, including deriving a title
+  const fromBody = extractHashtags(input.body?.trim() || null)
+  let body = fromBody.text
   const givenTitle = input.title?.trim() || null
   let title = givenTitle || deriveTitle(body)
   const data: Record<string, unknown> = { ...(input.data ?? {}) }
-  const tags = cleanTags(input.tags)
+  const tags = cleanTags([...(input.tags ?? []), ...fromBody.tags])
 
   // A shelved link: fetch what the page says about itself so the entry is
   // recognisable later, instead of being named after whatever word was nearby.
