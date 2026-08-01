@@ -307,11 +307,13 @@ export async function status(): Promise<IndexStatus> {
 function tuning(providerId: string) {
   const ceilingEnv = Number(process.env.FLOW_EMBEDDINGS_MAX_DISTANCE)
   const marginEnv = Number(process.env.FLOW_EMBEDDINGS_MARGIN)
+  const sepEnv = Number(process.env.FLOW_EMBEDDINGS_MIN_SEPARATION)
   return {
     ceiling: Number.isFinite(ceilingEnv) && ceilingEnv > 0
       ? ceilingEnv
       : /^gemini:/.test(providerId) ? 0.42 : 0.6,
     margin: Number.isFinite(marginEnv) && marginEnv > 0 ? marginEnv : 0.08,
+    separation: Number.isFinite(sepEnv) && sepEnv >= 0 ? sepEnv : 0.012,
   }
 }
 
@@ -326,7 +328,7 @@ export async function vectorSearch(query: string, limit = 30): Promise<string[]>
   const [vec] = await provider.embed([query], 'query')
   if (!vec) return []
 
-  const { ceiling, margin } = tuning(provider.id)
+  const { ceiling, margin, separation } = tuning(provider.id)
   const rows = await q<{ entry_id: string; dist: number }>(
     `select m.entry_id, (m.vec <=> $1::vector)::float8 as dist
        from flow.embeddings m
@@ -340,5 +342,24 @@ export async function vectorSearch(query: string, limit = 30): Promise<string[]>
   if (!rows.length) return []
 
   const best = rows[0]!.dist
+
+  /**
+   * A query with no purchase on the corpus leaves everything equidistant.
+   * Measured here: "paperclip" put four unrelated entries within 0.003 of each
+   * other, and gibberish within 0.010 — all under the ceiling, because an
+   * absolute threshold cannot tell "slightly close to everything" from
+   * "genuinely close to one thing".
+   *
+   * The spread is the tell — but only among the near neighbours. Measured
+   * against the median of everything this fails, because over a whole corpus
+   * the far tail is genuinely far and the gap looks healthy. The clustering
+   * that matters is right at the front: compare the best against the third
+   * nearest, and if it is barely ahead of its own neighbours, nothing matched.
+   */
+  if (rows.length >= 3) {
+    const neighbour = rows[2]!.dist
+    if (neighbour - best < separation) return []
+  }
+
   return rows.filter((r) => r.dist <= best + margin).map((r) => r.entry_id)
 }
