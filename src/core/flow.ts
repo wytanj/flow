@@ -60,14 +60,37 @@ function deriveTitle(body: string | null | undefined): string | null {
   return firstLine.length > 90 ? `${firstLine.slice(0, 87).trimEnd()}…` : firstLine
 }
 
+/**
+ * Shelves nest with `/`: `ai/harness` sits under `ai`. Hyphens stay literal, so
+ * `open-source` and `goodmoney` are single flat shelves — inferring hierarchy
+ * from `-` would split tags nobody meant to nest.
+ *
+ * The parent is never stored. `ai` is implied by `ai/harness`, and matching is
+ * by prefix, so there is no bookkeeping to get out of step.
+ */
 function cleanTags(tags?: string[] | null): string[] {
   if (!tags) return []
   const seen = new Set<string>()
   for (const t of tags) {
-    const tag = t.trim().toLowerCase().replace(/^#/, '')
+    const tag = t
+      .trim()
+      .toLowerCase()
+      .replace(/^#/, '')
+      .replace(/\s*\/\s*/g, '/') // "ai / harness" -> "ai/harness"
+      .replace(/\/{2,}/g, '/')
+      .replace(/^\/+|\/+$/g, '')
     if (tag) seen.add(tag)
   }
   return [...seen]
+}
+
+/**
+ * SQL matching a shelf and everything under it. `starts_with` rather than LIKE
+ * so tags containing `%` or `_` need no escaping.
+ */
+function shelfMatch(param: string, alias = 'e'): string {
+  return `exists (select 1 from unnest(${alias}.tags) tg
+                   where tg = ${param} or starts_with(tg, ${param} || '/'))`
 }
 
 // ---------------------------------------------------------------------------
@@ -256,8 +279,17 @@ function buildWhere(f: Filters, startAt = 1): Where {
   const kinds = f.kinds?.length ? f.kinds.map(normalizeKind) : f.kind ? [normalizeKind(f.kind)] : null
   if (kinds) add('e.kind = any($?)', kinds)
   if (f.status) add('e.status = $?', f.status.trim())
+
+  // One clause per shelf so each can match its own descendants; joined by AND
+  // for "all" and OR for "any".
   const tags = cleanTags(f.tags)
-  if (tags.length) add(f.tags_mode === 'any' ? 'e.tags && $?' : 'e.tags @> $?', tags)
+  if (tags.length) {
+    const parts = tags.map((tag) => {
+      params.push(tag)
+      return shelfMatch(`$${i++}`)
+    })
+    clauses.push(`(${parts.join(f.tags_mode === 'any' ? ' or ' : ' and ')})`)
+  }
   if (f.since) add('e.created_at >= $?', f.since)
   if (f.until) add('e.created_at <= $?', f.until)
   if (!f.include_archived) clauses.push('e.archived_at is null')
@@ -558,24 +590,70 @@ export async function renameShelf(from: string, to: string): Promise<Entry[]> {
   if (!oldTag || !newTag) throw new Error('Both the old and new shelf names are required.')
   if (oldTag === newTag) return []
 
+  // Renaming a shelf takes everything under it: ai -> models turns
+  // ai/harness into models/harness. Leaving descendants behind would orphan them.
   return q<Entry>(
-    `update flow.entries
-        set tags = (select coalesce(array_agg(distinct t), '{}')
-                      from unnest(array_replace(tags, $1, $2)) as t)
-      where $1 = any(tags)
+    `update flow.entries e
+        set tags = (select coalesce(array_agg(distinct
+                      case when t = $1 then $2
+                           when starts_with(t, $1 || '/') then $2 || substr(t, length($1) + 1)
+                           else t end), '{}')
+                      from unnest(e.tags) as t)
+      where ${shelfMatch('$1')}
       returning ${COLS}`,
     [oldTag, newTag],
   )
 }
 
-/** Every shelf, with what is on it. Tags are how things group in flow. */
-export async function shelves(): Promise<{ tag: string; count: number }[]> {
-  return q<{ tag: string; count: number }>(
-    `select t as tag, count(*)::int as count
-       from flow.entries e, unnest(e.tags) as t
-      where e.archived_at is null
-      group by t order by count desc, t asc`,
+export interface Shelf {
+  tag: string
+  /** Entries on this shelf *or any shelf under it*. */
+  count: number
+  /** Entries tagged with exactly this, not a descendant. */
+  own: number
+  depth: number
+  parent: string | null
+  label: string
+}
+
+/**
+ * Every shelf as a tree. Parents are synthesised from their children, so `ai`
+ * appears with a rolled-up count even if nothing was ever tagged plainly `ai`
+ * — otherwise nesting something would make its group vanish from the list.
+ */
+export async function shelves(): Promise<Shelf[]> {
+  const rows = await q<{ tag: string; count: number; own: number }>(
+    `with tagged as (
+       select distinct t as tag, e.id
+         from flow.entries e, unnest(e.tags) as t
+        where e.archived_at is null
+     ),
+     nodes as (
+       select tag as node, id from tagged
+       union
+       -- every ancestor path: ai/harness/mcp also counts toward ai/harness and ai
+       select array_to_string((string_to_array(tag, '/'))[1:i], '/'), id
+         from tagged,
+              generate_series(1, coalesce(array_length(string_to_array(tag, '/'), 1), 1) - 1) as i
+     )
+     select n.node as tag,
+            count(distinct n.id)::int as count,
+            (select count(distinct t2.id)::int from tagged t2 where t2.tag = n.node) as own
+       from nodes n
+      where n.node <> ''
+      group by n.node
+      order by n.node asc`,
   )
+
+  return rows.map((r) => {
+    const parts = r.tag.split('/')
+    return {
+      ...r,
+      depth: parts.length - 1,
+      parent: parts.length > 1 ? parts.slice(0, -1).join('/') : null,
+      label: parts[parts.length - 1] ?? r.tag,
+    }
+  })
 }
 
 export interface Stats {

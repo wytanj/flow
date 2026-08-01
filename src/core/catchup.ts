@@ -226,15 +226,20 @@ export async function catchUpEntry(entryId: string): Promise<CatchUpResult> {
   }
 }
 
-/** The entries on a shelf, oldest-checked first — what to catch up on. */
+/**
+ * The entries on a shelf, oldest-checked first — what to catch up on.
+ * Includes sub-shelves, so sweeping `ai` covers `ai/harness` too.
+ */
 export async function shelfQueue(tag: string, limit = 25): Promise<Entry[]> {
   return q<Entry>(
     `select id, kind, title, body, data, tags, status, rating, occurred_at, remind_at,
             source, archived_at, created_at, updated_at, last_checked_at
-       from flow.entries
-      where archived_at is null and $1 = any(tags)
+       from flow.entries e
+      where archived_at is null
+        and exists (select 1 from unnest(e.tags) tg
+                     where tg = $1 or starts_with(tg, $1 || '/'))
       order by last_checked_at asc nulls first, created_at desc
       limit $2`,
-    [tag.trim().toLowerCase(), Math.min(limit, 50)],
+    [tag.trim().toLowerCase().replace(/^#/, ''), Math.min(limit, 50)],
   )
 }

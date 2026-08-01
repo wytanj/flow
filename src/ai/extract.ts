@@ -84,6 +84,8 @@ function systemPrompt(now: string): string {
     '- Shelves are tags. "put this into hardware", "file under X", "shelf this with Y" — that word is',
     '  a tag, never the title. Naming an entry after its shelf makes every entry on that shelf',
     '  identical and unfindable.',
+    '- Shelves nest with a slash: ai/harness, ai/frontier. Use the most specific one only; the parent',
+    '  is implied and must not be added as a second tag. Hyphens are literal (open-source is flat).',
     '- For a link: leave the title empty unless the user named the thing themselves. flow fetches the',
     '  page title on save. Put the URL in data.url and keep the user\'s own reaction in body — their',
     '  take on a link is the part worth remembering, and it is not the same as what the page says.',

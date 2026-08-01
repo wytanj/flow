@@ -72,7 +72,8 @@
   /* filters */
   nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 12px; }
   nav button { padding: 5px 11px; font-size: 13px; }
-  #shelves { margin: -4px 0 12px; }
+  #shelves { margin: -4px 0 12px; flex-direction: column; align-items: flex-start; gap: 5px; }
+  .shelfrow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   #shelves button { padding: 3px 9px; font-size: 12px; border-color: var(--line-soft); color: var(--faint); }
   #shelves button:hover, #shelves button.on { color: var(--text); border-color: #4a4a56; }
   #shelves button.on { background: #1e1e24; }
@@ -312,27 +313,46 @@
     renderShelves()
   }
 
-  // Shelves are tags — the way links and thoughts on one subject group together.
+  // Shelves are tags, nested with '/'. Top level always shows; the children of
+  // whichever branch you are in appear beneath it, so depth never clutters.
   async function renderShelves() {
     const nav = $('shelves')
     let list
     try { list = (await api('/shelves')).shelves } catch { return }
     nav.innerHTML = ''
     if (!list.length) return
-    const lbl = document.createElement('span')
-    lbl.className = 'lbl'
-    lbl.textContent = 'shelves'
-    nav.append(lbl)
-    for (const s of list) {
+
+    const chip = (s) => {
       const b = document.createElement('button')
-      b.textContent = s.tag + ' ' + s.count
+      b.textContent = (s.depth ? s.label : s.tag) + ' ' + s.count
       b.className = shelf === s.tag ? 'on' : ''
+      b.title = s.tag + (s.own !== s.count ? ` — ${s.own} directly, ${s.count} including sub-shelves` : '')
       b.onclick = () => {
         shelf = shelf === s.tag ? null : s.tag
         $('search').value = ''
         renderFilters(); load()
       }
-      nav.append(b)
+      return b
+    }
+
+    const row = (labelText, items) => {
+      const wrap = document.createElement('div')
+      wrap.className = 'shelfrow'
+      const lbl = document.createElement('span')
+      lbl.className = 'lbl'
+      lbl.textContent = labelText
+      wrap.append(lbl, ...items.map(chip))
+      nav.append(wrap)
+    }
+
+    row('shelves', list.filter((s) => s.depth === 0))
+
+    // the branch we are inside: children of the current shelf, or of its parent
+    const current = list.find((s) => s.tag === shelf)
+    const branch = current ? (list.some((s) => s.parent === current.tag) ? current.tag : current.parent) : null
+    if (branch) {
+      const kids = list.filter((s) => s.parent === branch)
+      if (kids.length) row(branch + '/', kids)
     }
   }
 
