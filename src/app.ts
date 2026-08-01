@@ -18,6 +18,7 @@ import { AiUnavailable, aiEnabled } from './ai/llm.js'
 import { researchEnabled, researchMode } from './ai/research.js'
 import { catchUpEntry, shelfQueue } from './core/catchup.js'
 import { embeddingsConfigured } from './embeddings/provider.js'
+import { getIntegration, listIntegrations } from './integrations/index.js'
 import { status as embeddingStatus } from './embeddings/store.js'
 import * as flow from './core/flow.js'
 import { createFlowServer } from './mcp/tools.js'
@@ -200,6 +201,28 @@ export function createApp(): Hono {
     return c.json({ renamed: moved.length, entries: moved })
   })
   app.get('/embeddings', async (c) => c.json(await embeddingStatus()))
+
+  // --- integrations --------------------------------------------------------
+  app.get('/integrations', (c) => c.json({ integrations: listIntegrations() }))
+
+  app.post('/integrations/:name/sync', async (c) => {
+    const integration = getIntegration(c.req.param('name'))
+    if (!integration) throw new HTTPException(404, { message: 'No such integration' })
+    if (!integration.configured()) {
+      throw new HTTPException(400, { message: `Not configured — needs ${integration.requires}` })
+    }
+    const limit = Number(c.req.query('limit'))
+    return c.json(await integration.sync({ limit: Number.isFinite(limit) && limit > 0 ? limit : undefined }))
+  })
+
+  /** Starred repos and anything else collected but not yet thought about. */
+  app.get('/repos', async (c) => {
+    const query = c.req.query('q')
+    const entries = query
+      ? await flow.search(query, { kind: 'repo', limit: 50 })
+      : await flow.listEntries({ kind: 'repo', limit: 50 })
+    return c.json({ repos: entries })
+  })
 
   // --- model-backed --------------------------------------------------------
   // Through MCP the client's own model does this work. These give the REST and

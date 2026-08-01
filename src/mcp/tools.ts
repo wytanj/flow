@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { catchUpEntry, shelfQueue } from '../core/catchup.js'
+import { getIntegration, listIntegrations } from '../integrations/index.js'
 import * as flow from '../core/flow.js'
 import { formatEntryFull, formatEntryLine, formatList, formatSearch } from '../core/format.js'
 import { DATA_HINTS, KINDS } from '../core/kinds.js'
@@ -74,6 +75,10 @@ export function createFlowServer(): McpServer {
           Object.entries(DATA_HINTS)
             .map(([k, v]) => `${k} → {${v}}`)
             .join('; '),
+        '',
+        'Starred GitHub repos sync in as kind=repo with status=starred. "That project from my git" means',
+        'flow_repos. A star is only a bookmark — when the user says one is interesting, capture WHY with',
+        'flow_note, because their reason is the part worth remembering.',
         '',
         'Recall with flow_recall before saying you do not know something about the user.',
         'Entry references accept a full id, the short id shown in listings, or an exact title.',
@@ -309,6 +314,62 @@ export function createFlowServer(): McpServer {
         ]
           .filter(Boolean)
           .join('\n'),
+      )
+    }),
+  )
+
+  server.registerTool(
+    'flow_repos',
+    {
+      title: 'Starred repos',
+      description:
+        'Code projects the user has starred on GitHub, synced into flow. Use this whenever they ' +
+        'refer to something "from my git", "that repo I starred", or a project by a half-remembered ' +
+        'name. Matches the repo name, its description, language and topics. ' +
+        'When they say one is interesting, add their reason with flow_note and set status via ' +
+        'flow_update — that is what turns a passive star into something they actually thought about.',
+      inputSchema: {
+        query: z.string().optional().describe('Name, topic, language or what it does. Omit to list recent stars.'),
+        limit: z.number().int().min(1).max(200).optional(),
+      },
+    },
+    guard(async ({ query, limit }) => {
+      const entries = query
+        ? await flow.search(query, { kind: 'repo', limit })
+        : await flow.listEntries({ kind: 'repo', limit })
+      return text(
+        formatList(entries, query ? `No starred repo matches "${query}".` : 'No repos synced yet.'),
+      )
+    }),
+  )
+
+  server.registerTool(
+    'flow_sync',
+    {
+      title: 'Sync an integration',
+      description:
+        'Pull in things collected elsewhere — currently GitHub stars. Safe to run repeatedly: ' +
+        'already-imported items are recognised and left alone. Call with no arguments to see what ' +
+        'is available and configured.',
+      inputSchema: {
+        source: z.string().optional().describe('Integration id, e.g. github. Omit to list them.'),
+        limit: z.number().int().min(1).max(500).optional(),
+      },
+    },
+    guard(async ({ source, limit }) => {
+      if (!source) {
+        const list = listIntegrations()
+          .map((i) => `- ${i.id} (${i.label}) — ${i.configured ? 'configured' : `needs ${i.requires}`}`)
+          .join('\n')
+        return text(`Integrations:\n${list}`)
+      }
+      const integration = getIntegration(source)
+      if (!integration) return text(`No integration called "${source}".`)
+      if (!integration.configured()) return text(`${integration.id} needs ${integration.requires}`)
+      const r = await integration.sync({ limit })
+      return text(
+        `Synced ${r.source}: ${r.imported} new, ${r.skipped} already had, ${r.total_seen} seen.` +
+          (r.note ? `\n${r.note}` : ''),
       )
     }),
   )

@@ -303,6 +303,51 @@ Repeat sweeps are told what has already been recorded, so they do not write the 
 
 ---
 
+## Integrations
+
+Things you already collect somewhere else, pulled in so they are recallable next to what you
+wrote yourself.
+
+```bash
+npm run sync                # what is available, and configured
+npm run sync -- github      # import starred repos — safe to re-run
+```
+
+**GitHub stars** is the first. Set `GITHUB_USER` for public stars (no token), or `GITHUB_TOKEN`
+to include private ones and lift the rate limit. Repos arrive as `kind: repo` with the
+description, language, topics and star count in `data` — and the body left empty, because that
+is reserved for what *you* say about it.
+
+Then ask for things the way you'd actually say them:
+
+> "that self-hosted chat UI thing from my git" → `open-webui/open-webui`
+> "the defi command line one" → `ggonzalez94/defi-cli`
+
+Two rules make this work at scale.
+
+**Imported is not authored.** You starred 51 things and thought hard about three. Imports land
+with `status: starred` and are kept out of the briefing's *recent* — they get their own
+*collected* section instead. Otherwise fifty bookmarks bury the handful of memories that matter.
+Say something about one and it promotes itself into your real memory, because "recent" means
+recently *engaged with*, not recently created.
+
+**Sync is idempotent.** Every imported item carries `capture_id = <source>:<type>:<external-id>`,
+so re-running imports nothing twice — the same mechanism device clients use for offline retries.
+Re-running the GitHub sync reports `0 new, 51 already had`.
+
+Adding a source is one module implementing `Integration` plus a line in the registry; the REST
+route, CLI command and MCP tool are all generic over it. Obvious next ones: browser bookmarks,
+Letterboxd straight into the watchlist, Pocket, X bookmarks, LinkedIn connections.
+
+| | |
+| --- | --- |
+| `GET /integrations` | what exists and whether it is configured |
+| `POST /integrations/:name/sync` | run one |
+| `GET /repos?q=` | starred repos, searchable |
+| `flow_repos`, `flow_sync` | the MCP equivalents |
+
+---
+
 ## Running it entirely locally
 
 No cloud, no keys, nothing leaving your machine. Reasonable for a store that holds your life.

@@ -20,7 +20,8 @@
     "embeddings:sync": "tsx scripts/embeddings.ts sync",
     "smoke": "node scripts/smoke-mcp.mjs",
     "telegram:register": "node scripts/telegram-register.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sync": "tsx scripts/sync.ts"
   },
   "dependencies": {
     "@hono/mcp": "^0.3.1",

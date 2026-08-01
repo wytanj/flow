@@ -3,7 +3,7 @@
  * of memory never needs a migration. These are the ones flow understands well
  * enough to pick sensible defaults for.
  */
-export const KINDS = ['thought', 'movie', 'person', 'reading', 'task', 'fact', 'place', 'idea'] as const
+export const KINDS = ['thought', 'movie', 'person', 'reading', 'task', 'fact', 'place', 'idea', 'repo'] as const
 
 export type Kind = (typeof KINDS)[number] | (string & {})
 
@@ -20,6 +20,9 @@ const ALIASES: Record<string, string> = {
   connection: 'person',
   linkedin: 'person',
   people: 'person',
+  repository: 'repo',
+  github: 'repo',
+  project_repo: 'repo',
   article: 'reading',
   essay: 'reading',
   book: 'reading',
@@ -59,7 +62,15 @@ export const DONE_STATUSES = ['watched', 'done', 'read', 'dropped', 'abandoned',
  * Fields worth filling in per kind. Surfaced to the model so a capture of a
  * person tends to carry a company, and a movie tends to carry a year.
  */
+/**
+ * Statuses meaning "collected from somewhere else, not yet thought about".
+ * Entries in this state stay out of the briefing so a few hundred imported
+ * bookmarks cannot bury the handful of things you actually wrote.
+ */
+export const UNTOUCHED_STATUSES = ['starred', 'imported', 'saved']
+
 export const DATA_HINTS: Record<string, string> = {
+  repo: 'owner, language, stars, topics, url, homepage — starred repos sync in from GitHub',
   movie: 'year, director, service (where to watch), recommended_by, runtime',
   person: 'company, role, linkedin, met_at (where/event), met_on (date), location, mutual, follow_up',
   reading: 'url, author, source, published',
