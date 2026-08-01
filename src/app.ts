@@ -103,10 +103,13 @@ export function createApp(): Hono {
     const input = contentType.includes('text/plain')
       ? { body: await c.req.text(), source: 'api' }
       : await body(c, captureSchema)
-    if (!input.body?.trim() && !('title' in input && input.title)) {
-      throw new HTTPException(400, { message: 'Provide a title or a body' })
-    }
-    return c.json(await flow.capture({ ...input, source: input.source ?? 'api' }), 201)
+    const result = await flow.capture({
+      ...input,
+      source: input.source ?? 'api',
+      capture_id: idempotencyKey(c, input),
+    })
+    // 200 rather than 201 on a replay, so a client can tell it was a no-op
+    return c.json(result, result.created ? 201 : 200)
   })
 
   app.get('/search', async (c) => {
@@ -205,10 +208,11 @@ export function createApp(): Hono {
   /** Free text in, structured entries out. One brain dump may become several. */
   app.post('/jot', async (c) => {
     const contentType = c.req.header('content-type') ?? ''
-    const input = contentType.includes('text/plain')
-      ? await c.req.text()
-      : (await body(c, z.object({ text: z.string().min(1) }))).text
-    return c.json(await smartCapture(input, 'api'), 201)
+    const parsed = contentType.includes('text/plain')
+      ? { text: await c.req.text(), capture_id: undefined }
+      : await body(c, z.object({ text: z.string().min(1), capture_id: z.string().optional() }))
+    const result = await smartCapture(parsed.text, 'api', idempotencyKey(c, parsed))
+    return c.json(result, result.entries.length ? 201 : 200)
   })
 
   /** Natural-language question, answered strictly from your own entries. */
@@ -243,6 +247,18 @@ export function createApp(): Hono {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Idempotency key for a capture, from the body or the conventional header.
+ * A phone that buffered offline and flushed twice must not create the memory
+ * twice — so this is how every device client should send captures.
+ */
+function idempotencyKey(
+  c: { req: { header: (k: string) => string | undefined } },
+  input: { capture_id?: string | null },
+): string | null {
+  return input.capture_id?.trim() || c.req.header('idempotency-key')?.trim() || null
+}
+
 function bearerFrom(header: string | undefined): string | null {
   if (!header) return null
   return header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : null
@@ -259,6 +275,7 @@ const captureSchema = z.object({
   occurred_at: z.string().optional(),
   remind_at: z.string().optional(),
   source: z.string().optional(),
+  capture_id: z.string().optional(),
 })
 
 /** Parses a JSON body against a schema, turning failures into a 400. */

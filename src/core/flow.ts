@@ -20,6 +20,7 @@ export interface Entry {
   created_at: string
   updated_at: string
   last_checked_at: string | null
+  capture_id: string | null
 }
 
 export interface Note {
@@ -38,7 +39,8 @@ export interface LinkedEntry {
 }
 
 const COLS = `id, kind, title, body, data, tags, status, rating,
-  occurred_at, remind_at, source, archived_at, created_at, updated_at, last_checked_at`
+  occurred_at, remind_at, source, archived_at, created_at, updated_at, last_checked_at,
+  capture_id`
 
 // pg_trgm may not be installable on every project; probe once and degrade to
 // plain full-text + ILIKE if it is missing.
@@ -110,6 +112,12 @@ export interface CaptureInput {
   source?: string
   /** Set false to skip fetching a link's title and description. */
   enrich?: boolean
+  /**
+   * Client-generated id for this capture attempt. Retrying with the same id
+   * returns the entry already stored instead of creating a second one — what
+   * makes an offline buffer on a phone or a device safe to flush repeatedly.
+   */
+  capture_id?: string | null
 }
 
 export interface CaptureResult {
@@ -117,9 +125,20 @@ export interface CaptureResult {
   /** Existing entries of the same kind with a near-identical title, if any.
    *  Not merged automatically — surfaced so the caller can decide. */
   possible_duplicates: Pick<Entry, 'id' | 'kind' | 'title' | 'status' | 'created_at'>[]
+  /** False when a capture_id replay returned the entry already stored. */
+  created: boolean
 }
 
 export async function capture(input: CaptureInput): Promise<CaptureResult> {
+  const captureId = input.capture_id?.trim() || null
+
+  // Check before doing any work: a retry should be cheap, and enrichment costs
+  // a network fetch we have already paid for once.
+  if (captureId) {
+    const already = await q1<Entry>(`select ${COLS} from flow.entries where capture_id = $1`, [captureId])
+    if (already) return { entry: already, possible_duplicates: [], created: false }
+  }
+
   let kind = normalizeKind(input.kind)
   let body = input.body?.trim() || null
   const givenTitle = input.title?.trim() || null
@@ -168,10 +187,13 @@ export async function capture(input: CaptureInput): Promise<CaptureResult> {
 
   const status = input.status?.trim() || defaultStatus(kind)
 
-  const entry = await q1<Entry>(
+  // ON CONFLICT as well as the check above: two retries can be in flight at
+  // once, and the pre-check cannot see a row that is not committed yet.
+  let entry = await q1<Entry>(
     `insert into flow.entries
-       (kind, title, body, data, tags, status, rating, occurred_at, remind_at, source)
-     values ($1, $2, $3, coalesce($4::jsonb, '{}'::jsonb), $5, $6, $7, $8, $9, $10)
+       (kind, title, body, data, tags, status, rating, occurred_at, remind_at, source, capture_id)
+     values ($1, $2, $3, coalesce($4::jsonb, '{}'::jsonb), $5, $6, $7, $8, $9, $10, $11)
+     on conflict (capture_id) where capture_id is not null do nothing
      returning ${COLS}`,
     [
       kind,
@@ -184,8 +206,15 @@ export async function capture(input: CaptureInput): Promise<CaptureResult> {
       input.occurred_at ?? null,
       input.remind_at ?? null,
       input.source ?? 'api',
+      captureId,
     ],
   )
+
+  if (!entry && captureId) {
+    // lost the race — the winner's row is the answer
+    const winner = await q1<Entry>(`select ${COLS} from flow.entries where capture_id = $1`, [captureId])
+    if (winner) return { entry: winner, possible_duplicates: [], created: false }
+  }
   if (!entry) throw new Error('capture failed')
 
   // Inline rather than fire-and-forget: a serverless invocation is killed the
@@ -193,7 +222,7 @@ export async function capture(input: CaptureInput): Promise<CaptureResult> {
   // swallows its own failures.
   await embedEntry(entry)
 
-  return { entry, possible_duplicates: await findDuplicates(entry) }
+  return { entry, possible_duplicates: await findDuplicates(entry), created: true }
 }
 
 // Duplicate risk is real for named things (a person, a film) and meaningless

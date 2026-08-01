@@ -67,7 +67,7 @@ async function main() {
 
   switch (head) {
     case 'jot': {
-      const { entries, duplicates } = await smartCapture(tail.join(' '), 'cli')
+      const { entries, duplicates } = await smartCapture(tail.join(' '), 'cli', flags.id)
       for (const e of entries) console.log(formatEntryLine(e))
       for (const d of duplicates) {
         const dupe = d.existing.map((x) => `${x.id.slice(0, 8)} ${x.title}`).join(', ')
@@ -155,6 +155,7 @@ async function main() {
     rating: flags.rating ? Number(flags.rating) : undefined,
     remind_at: flags.remind,
     source: 'cli',
+    capture_id: flags.id,
   })
   console.log(`Captured [${entry.id.slice(0, 8)}] ${entry.title ?? ''} (${entry.kind})`)
 }

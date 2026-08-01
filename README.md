@@ -142,6 +142,33 @@ Bearer auth on everything except `/health`.
 `:id` takes a full uuid, the short id shown in listings, **or an exact title** — so
 `PATCH /entries/Perfect%20Days` works. Ambiguous references are rejected rather than guessed.
 
+### Capturing from a device
+
+Anything that captures offline and syncs later — a phone, a bot, a dedicated device — will
+eventually retry a request it already delivered. Send a client-generated id and the retry
+becomes a no-op instead of a second copy of the same memory:
+
+```bash
+curl -X POST $U/capture -H "Authorization: Bearer $T" \
+     -H 'Idempotency-Key: 7f3c…' -H 'Content-Type: application/json' \
+     -d '{"body":"tide tables are a scheduling problem"}'
+```
+
+Either the `Idempotency-Key` header or a `capture_id` field works, on `/capture` and `/jot`.
+The response carries `created` — `true` when it stored something, `false` when it recognised a
+replay — and the status is **201** or **200** to match, so a client can tell without parsing.
+
+Replays short-circuit before any work: no link fetch, no embedding, no model call. Measured at
+75ms against 1121ms for the original. Concurrent retries are safe too — a partial unique index
+plus `ON CONFLICT` means two simultaneous flushes of the same id produce one row, verified.
+
+A jot that becomes several entries suffixes the id per entry (`<id>#0`, `#1`), so retrying a
+multi-part brain dump lands on the same rows rather than duplicating all of them.
+
+**Generate one id per captured thought, not per request** — reuse it across every retry of that
+thought, never across different thoughts. Without an id, repeats are allowed: two identical
+captures are two entries, because nothing claimed they were the same event.
+
 ---
 
 ## Bring your own

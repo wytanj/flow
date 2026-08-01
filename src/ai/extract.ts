@@ -99,8 +99,20 @@ export interface SmartCaptureResult {
   duplicates: { entry_id: string; existing: { id: string; title: string | null; status: string | null }[] }[]
 }
 
-/** Extracts entries from free text and writes them. Returns what was stored. */
-export async function smartCapture(text: string, source = 'ai'): Promise<SmartCaptureResult> {
+/**
+ * Extracts entries from free text and writes them. Returns what was stored.
+ *
+ * One jot can become several entries, so the caller's capture_id is suffixed
+ * per entry: a retry of the same jot lands on the same rows rather than
+ * duplicating the lot. The extraction is re-run, which costs a model call, but
+ * the writes stay idempotent — and the ordering is stable enough for the
+ * suffixes to line up.
+ */
+export async function smartCapture(
+  text: string,
+  source = 'ai',
+  captureId?: string | null,
+): Promise<SmartCaptureResult> {
   const input = text.trim()
   if (!input) throw new Error('Nothing to capture.')
 
@@ -112,12 +124,17 @@ export async function smartCapture(text: string, source = 'ai'): Promise<SmartCa
 
   if (!extracted?.length) {
     // Rather than lose the input to a model that found nothing in it, keep it verbatim.
-    const { entry } = await flow.capture({ kind: 'thought', body: input, source })
+    const { entry } = await flow.capture({
+      kind: 'thought',
+      body: input,
+      source,
+      capture_id: captureId ? `${captureId}#0` : null,
+    })
     return { entries: [entry], duplicates: [] }
   }
 
   const results: SmartCaptureResult = { entries: [], duplicates: [] }
-  for (const e of extracted) {
+  for (const [index, e] of extracted.entries()) {
     const data: Record<string, string> = {}
     for (const { key, value } of e.data ?? []) {
       if (key && value) data[key] = value
@@ -133,6 +150,7 @@ export async function smartCapture(text: string, source = 'ai'): Promise<SmartCa
       occurred_at: e.occurred_at,
       remind_at: e.remind_at,
       source,
+      capture_id: captureId ? `${captureId}#${index}` : null,
     })
     results.entries.push(entry)
     if (possible_duplicates.length) {

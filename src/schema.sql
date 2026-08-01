@@ -58,6 +58,14 @@ alter table flow.entries add column if not exists last_checked_at timestamptz;
 -- rewritten by anything automated; 'research' is dated, sourced, and additive.
 alter table flow.notes   add column if not exists source text not null default 'me';
 
+-- capture_id: a client-generated id for one capture attempt, so a phone that
+-- buffered offline and retried on a flaky link cannot create the same memory
+-- twice. Server-side captures leave it null, hence a partial unique index —
+-- nulls are excluded, so unrelated captures never collide.
+alter table flow.entries add column if not exists capture_id text;
+create unique index if not exists entries_capture_id_idx
+  on flow.entries (capture_id) where capture_id is not null;
+
 -- links: "this thought is about that person", "she recommended this film"
 create table if not exists flow.links (
   id         uuid primary key default gen_random_uuid(),
