@@ -569,7 +569,10 @@
    * in a year you need to know which thoughts were yours.
    */
   function noteHtml(n) {
-    const research = n.source === 'research'
+    // anything not written by the user is marked and named, whether flow looked
+    // it up or another model produced it
+    const research = n.source && n.source !== 'me'
+    const who = n.source === 'research' ? 'looked up' : n.source
     const body = esc(n.body)
       // citations arrive as [[1]](url)
       .replace(/\[\[(\d+)\]\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">[$1]</a>')
@@ -578,7 +581,7 @@
       .replace(/\n/g, '<br>')
     return (
       '<div class="note' + (research ? ' research' : '') + '">' +
-      (research ? '<span class="who">looked up</span> ' : '') +
+      (research ? '<span class="who">' + esc(who) + '</span> ' : '') +
       '<time>' + n.created_at.slice(0, 10) + '</time> — ' + body +
       '</div>'
     )

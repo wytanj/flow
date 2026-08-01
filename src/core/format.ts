@@ -62,7 +62,12 @@ export function formatEntryFull(
   if (e.body) lines.push('', e.body)
   if (e.notes.length) {
     lines.push('', `## notes (${e.notes.length})`)
-    for (const n of e.notes) lines.push(`- ${day(n.created_at)} — ${n.body}`)
+    for (const n of e.notes) {
+      // provenance has to survive being read back, or a model will treat an
+      // analysis it fetched last month as something the user said
+      const who = n.source && n.source !== 'me' ? ` [${n.source}]` : ''
+      lines.push(`- ${day(n.created_at)}${who} — ${n.body}`)
+    }
   }
   if (e.links.length) {
     lines.push('', '## linked')

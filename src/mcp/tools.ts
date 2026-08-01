@@ -80,6 +80,12 @@ export function createFlowServer(): McpServer {
         'flow_repos. A star is only a bookmark — when the user says one is interesting, capture WHY with',
         'flow_note, because their reason is the part worth remembering.',
         '',
+        'When the user hands over work done elsewhere — an analysis from another model, a report,',
+        'a comparison they had Grok write — record WHO produced it. Their own words go in an entry',
+        'body; anything produced by a model or copied from elsewhere goes in a note with source set',
+        'to its origin. Use flow_capture_many for a handover covering several subjects: one entry',
+        'per subject, one for the analysis, links between them, in a single call.',
+        '',
         'Recall with flow_recall before saying you do not know something about the user.',
         'Entry references accept a full id, the short id shown in listings, or an exact title.',
       ].join('\n'),
@@ -121,6 +127,102 @@ export function createFlowServer(): McpServer {
           ...possible_duplicates.map((d) => `- [${d.id.slice(0, 8)}] ${d.title} (${d.status ?? 'no status'})`),
         )
       }
+      return text(lines.join('\n'))
+    }),
+  )
+
+  server.registerTool(
+    'flow_capture_many',
+    {
+      title: 'Capture several linked things at once',
+      description:
+        'Save multiple entries and the links between them in one call. Built for handing over a ' +
+        'chunk of work done elsewhere — a comparison of two products, research on a shortlist, ' +
+        'notes from a call covering several people.\n\n' +
+        'The pattern for "here is an analysis another model produced": one entry per subject, one ' +
+        'entry for the analysis itself, and links from the analysis to each subject. Put the ' +
+        'analysis text in that entry\'s `note` with `note_source` set to whatever produced it — ' +
+        'not in `body`, which belongs to the user. Give each entry a `ref` so links can point at ' +
+        'things being created in the same call.\n\n' +
+        'Subjects that already exist are reused, not duplicated: a `ref` matching an existing ' +
+        'title resolves to it.',
+      inputSchema: {
+        entries: z
+          .array(
+            z.object({
+              ref: z.string().optional().describe('Short handle for linking within this call, e.g. "a"'),
+              kind: z.string().optional(),
+              title: z.string().optional(),
+              body: z.string().optional().describe("The USER's own words only"),
+              data: z.record(z.any()).optional(),
+              tags: z.array(z.string()).optional(),
+              status: z.string().optional(),
+              rating: z.number().int().min(1).max(10).optional(),
+              occurred_at: z.string().optional(),
+              remind_at: z.string().optional(),
+              note: z.string().optional().describe('An initial note to attach'),
+              note_source: z
+                .string()
+                .optional()
+                .describe("Who wrote `note`: 'me', or the model/tool it came from"),
+            }),
+          )
+          .min(1)
+          .max(20),
+        links: z
+          .array(
+            z.object({
+              from: z.string().describe('A ref from this call, or an existing id/title'),
+              to: z.string(),
+              rel: z.string().optional().describe('e.g. compares, about, prompted_by'),
+            }),
+          )
+          .optional(),
+      },
+    },
+    guard(async ({ entries, links }) => {
+      const refs = new Map<string, string>()
+      const made: flow.Entry[] = []
+      const reused: flow.Entry[] = []
+
+      for (const item of entries) {
+        const { ref, note, note_source, ...input } = item
+
+        // A ref naming something already stored means "attach to that", not
+        // "make another one" — the whole point when adding to known subjects.
+        let existing: string | null = null
+        if (input.title) {
+          existing = await flow.resolveId(input.title).catch(() => null)
+        }
+
+        if (existing) {
+          const e = await flow.getEntry(existing)
+          if (e) reused.push(e)
+          if (ref) refs.set(ref, existing)
+          if (note) await flow.addNote(existing, note, note_source?.trim() || 'me')
+          continue
+        }
+
+        const { entry } = await flow.capture({ ...input, source: 'mcp' })
+        made.push(entry)
+        if (ref) refs.set(ref, entry.id)
+        if (note) await flow.addNote(entry.id, note, note_source?.trim() || 'me')
+      }
+
+      const resolve = async (r: string) => refs.get(r) ?? (await flow.resolveId(r))
+      let linked = 0
+      for (const l of links ?? []) {
+        try {
+          await flow.linkEntries(await resolve(l.from), await resolve(l.to), l.rel ?? 'related')
+          linked++
+        } catch (err) {
+          log('link failed:', err)
+        }
+      }
+
+      const lines = [`Captured ${made.length}${reused.length ? `, added to ${reused.length} existing` : ''}${linked ? `, ${linked} links` : ''}:`]
+      if (made.length) lines.push(formatList(made))
+      if (reused.length) lines.push('Existing:', formatList(reused))
       return text(lines.join('\n'))
     }),
   )
@@ -202,13 +304,24 @@ export function createFlowServer(): McpServer {
       inputSchema: {
         id: z.string().describe('Full id, short id, or exact title'),
         body: z.string().describe('The thought to append'),
+        source: z
+          .string()
+          .optional()
+          .describe(
+            "Who produced this text. 'me' (the default) means the user's own words. If it came " +
+              'from anywhere else — another model, a report they pasted, a search — name it ' +
+              "('grok', 'chatgpt', 'perplexity'). Never file someone else's analysis as the " +
+              "user's own thinking: in a year they must still be able to tell which was which.",
+          ),
       },
     },
-    guard(async ({ id, body }) => {
+    guard(async ({ id, body, source }) => {
       const entryId = await flow.resolveId(id)
-      await flow.addNote(entryId, body)
+      await flow.addNote(entryId, body, source?.trim() || 'me')
       const entry = await flow.getEntry(entryId)
-      return text(`Noted on "${entry?.title ?? entryId}" (${entry?.notes.length ?? 1} notes total).`)
+      return text(
+        `Noted on "${entry?.title ?? entryId}"${source && source !== 'me' ? ` (attributed to ${source})` : ''} — ${entry?.notes.length ?? 1} notes total.`,
+      )
     }),
   )
 
