@@ -126,6 +126,16 @@ export function createApp(): Hono {
 
   app.get('/entries', async (c) => c.json({ entries: await flow.listEntries(filtersFromQuery(c)) }))
 
+  /** Recently engaged with — the honest "what have I been up to" list. */
+  app.get('/recent', async (c) =>
+    c.json({ entries: await flow.recentlyEngaged(Number(c.req.query('limit')) || 50) }),
+  )
+
+  /** Collected elsewhere, not yet thought about. Kept out of /recent. */
+  app.get('/collected', async (c) =>
+    c.json({ entries: await flow.untouchedImports(Number(c.req.query('limit')) || 50) }),
+  )
+
   app.get('/entries/:id', async (c) => {
     const entry = await flow.getEntry(await flow.resolveId(c.req.param('id')))
     if (!entry) throw new HTTPException(404, { message: 'Not found' })

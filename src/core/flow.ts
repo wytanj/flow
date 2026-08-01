@@ -763,6 +763,22 @@ export async function stats(): Promise<Stats> {
 }
 
 /**
+ * What you have actually been working with. Ordered by last engagement rather
+ * than creation, so a repo starred two years ago and commented on this morning
+ * sits at the top — and untouched imports stay out entirely, or 51 stars would
+ * be "what's new".
+ */
+export async function recentlyEngaged(limit = 50): Promise<Entry[]> {
+  return q<Entry>(
+    `select ${COLS} from flow.entries
+      where archived_at is null and (status is null or status <> all($1::text[]))
+      order by greatest(updated_at, coalesce(occurred_at, created_at)) desc
+      limit $2`,
+    [UNTOUCHED_STATUSES, clampLimit(limit)],
+  )
+}
+
+/**
  * Things collected elsewhere and not yet engaged with — starred repos, imported
  * bookmarks. Kept separate from authored memories so they cannot bury them.
  */
@@ -779,16 +795,7 @@ export async function untouchedImports(limit = 8): Promise<Entry[]> {
 export async function briefing() {
   const [dueItems, recent, watchlist, tasks, people, collected] = await Promise.all([
     due(0, 10),
-    // "Recent" means recently *engaged with*, not recently created. A repo
-    // starred two years ago that you commented on this morning belongs here;
-    // ordering by occurred_at alone would hide it. Untouched imports are
-    // excluded, so the 51 stars just synced cannot flood it.
-    q<Entry>(
-      `select ${COLS} from flow.entries
-        where archived_at is null and (status is null or status <> all($1::text[]))
-        order by greatest(updated_at, coalesce(occurred_at, created_at)) desc limit 10`,
-      [UNTOUCHED_STATUSES],
-    ),
+    recentlyEngaged(10),
     open('movie', 8),
     open('task', 10),
     listEntries({ kind: 'person', limit: 5 }),

@@ -192,6 +192,9 @@ nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 12px; }
 .detail .noteform { display: flex; gap: 6px; margin-top: 10px; }
 .detail .noteform input { flex: 1; min-width: 0; }
 
+.dayhead { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; font-weight: 700;
+           color: var(--faint); padding: 16px 2px 6px; border-bottom: 1px solid var(--line-soft); }
+.dayhead:first-child { padding-top: 2px; }
 .empty { color: var(--faint); padding: 26px 2px; text-align: center; font-size: 13px; }
 .spin { color: var(--faint); padding: 20px 2px; font-size: 13px; }
 [hidden] { display: none !important; }
@@ -304,7 +307,7 @@ nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 12px; }
   const kindHue = (k) => KIND_HUE[k] ?? hueFor(k)
   let token = localStorage.getItem(KEY) || ''
   let mode = 'remember'
-  let view = 'all'
+  let view = 'recent'
   let shelf = null
   let aiOn = true
   let researchOn = false
@@ -312,8 +315,9 @@ nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 12px; }
   let openId = null
 
   const VIEWS = [
-    ['all', 'all'], ['due', 'due'], ['thought', 'thoughts'], ['movie', 'watchlist'],
-    ['person', 'people'], ['reading', 'reading'], ['task', 'tasks'], ['idea', 'ideas'],
+    ['recent', 'recent'], ['all', 'all'], ['due', 'due'], ['collected', 'collected'],
+    ['thought', 'thoughts'], ['movie', 'watchlist'], ['person', 'people'],
+    ['reading', 'reading'], ['repo', 'repos'], ['task', 'tasks'], ['idea', 'ideas'],
   ]
 
   // --- api ------------------------------------------------------------------
@@ -485,6 +489,19 @@ nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 12px; }
   }
 
   // --- shelf bar ------------------------------------------------------------
+  function dayLabel(ts) {
+    if (!ts) return 'undated'
+    const d = new Date(ts)
+    const midnight = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+    const days = Math.round((midnight(new Date()) - midnight(d)) / 86400000)
+    if (days <= 0) return 'today'
+    if (days === 1) return 'yesterday'
+    if (days < 7) return d.toLocaleDateString(undefined, { weekday: 'long' })
+    if (d.getFullYear() === new Date().getFullYear())
+      return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long' })
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+  }
+
   function ago(ts) {
     if (!ts) return null
     const days = Math.floor((Date.now() - new Date(ts).getTime()) / 86400000)
@@ -555,6 +572,10 @@ nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 12px; }
         entries = (await api('/search?limit=50&q=' + encodeURIComponent(q))).results
       } else if (shelf) {
         entries = (await api('/entries?limit=50&tags=' + encodeURIComponent(shelf))).entries
+      } else if (view === 'recent') {
+        entries = (await api('/recent?limit=50')).entries
+      } else if (view === 'collected') {
+        entries = (await api('/collected?limit=50')).entries
       } else if (view === 'due') {
         entries = (await api('/due?within_days=14')).due
       } else if (view === 'movie') {
@@ -574,11 +595,29 @@ nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 12px; }
   function renderFeed(entries, focusId) {
     const feed = $('feed')
     if (!entries.length) {
-      feed.innerHTML = '<div class="empty">' + ($('search').value.trim() ? 'nothing matches' : 'nothing here yet') + '</div>'
+      feed.innerHTML = '<div class="empty">' + ($('search').value.trim() ? 'nothing matches' : view === 'collected' ? 'nothing collected and unread' : 'nothing here yet') + '</div>'
       return
     }
     feed.innerHTML = ''
-    for (const e of entries) feed.append(entryEl(e))
+    // Day headers, so recency is visible rather than merely implied by order.
+    // Only where the list is actually chronological — a ranked search result
+    // grouped by date would imply an ordering it does not have.
+    const chronological = !$('search').value.trim() && (view === 'recent' || view === 'all' || view === 'collected' || shelf)
+    let lastDay = null
+    for (const e of entries) {
+      if (chronological) {
+        const stamp = view === 'recent' ? (e.updated_at > (e.occurred_at || e.created_at) ? e.updated_at : (e.occurred_at || e.created_at)) : (e.occurred_at || e.created_at)
+        const day = dayLabel(stamp)
+        if (day !== lastDay) {
+          lastDay = day
+          const h = document.createElement('div')
+          h.className = 'dayhead'
+          h.textContent = day
+          feed.append(h)
+        }
+      }
+      feed.append(entryEl(e))
+    }
     if (focusId) {
       const el = feed.querySelector('[data-id^="' + focusId + '"]')
       if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.querySelector('.head').click() }
