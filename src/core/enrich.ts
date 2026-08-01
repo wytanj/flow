@@ -77,6 +77,32 @@ function siteName(metaSite: string | undefined, url: string): string | undefined
   }
 }
 
+/**
+ * Last resort when the page yields no metadata at all — a PDF, a login wall, a
+ * dead host. The URL's final segment is often the title in disguise:
+ * ".../1a%20Occasional%20Paper%20on%20Income%20Growth..." is a real title once
+ * decoded, and infinitely better than storing the raw URL as the name.
+ */
+export function titleFromUrl(url: string): string | undefined {
+  try {
+    const path = new URL(url).pathname
+    const last = path.split('/').filter(Boolean).pop()
+    if (!last) return undefined
+    const cleaned = decodeURIComponent(last)
+      .replace(/\.(pdf|html?|php|aspx?|md|txt|docx?)$/i, '')
+      .replace(/[_+-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    // ids and hashes are not titles
+    if (cleaned.length < 4 || cleaned.length > 120) return undefined
+    if (!/[a-z]{3}/i.test(cleaned)) return undefined
+    if (/^[0-9a-f-]{16,}$/i.test(cleaned)) return undefined
+    return cleaned.charAt(0).toUpperCase() + cleaned.slice(1)
+  } catch {
+    return undefined
+  }
+}
+
 /** "Overview" on docs.colossus.credit becomes "Colossus — Overview". */
 function qualifyTitle(title: string | undefined, site: string | undefined, url: string): string | undefined {
   const t = title?.trim()

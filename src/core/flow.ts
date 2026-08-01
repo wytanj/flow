@@ -1,7 +1,7 @@
 import { q, q1 } from '../db.js'
 import { embeddingsConfigured } from '../embeddings/provider.js'
 import { embedEntry, vectorSearch } from '../embeddings/store.js'
-import { extractUrl, fetchLinkMeta, isUrlOnly, isWeakTitle } from './enrich.js'
+import { extractUrl, fetchLinkMeta, isUrlOnly, isWeakTitle, titleFromUrl } from './enrich.js'
 import { DONE_STATUSES, UNTOUCHED_STATUSES, defaultStatus, normalizeKind } from './kinds.js'
 
 export interface Entry {
@@ -182,7 +182,9 @@ export async function capture(input: CaptureInput): Promise<CaptureResult> {
     // The URL now lives in data.url, so a body that is nothing but the URL is
     // noise where your own words should be.
     if (isUrlOnly(body)) body = null
-    if (!title) title = url
+    // A raw URL is not a name. PDFs and login walls yield no metadata, but the
+    // path's last segment usually carries the title.
+    if (!title) title = titleFromUrl(url) ?? url
   }
 
   const status = input.status?.trim() || defaultStatus(kind)
