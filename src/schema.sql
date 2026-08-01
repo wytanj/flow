@@ -51,6 +51,13 @@ create table if not exists flow.notes (
   created_at timestamptz not null default now()
 );
 
+-- Added later; kept as alters so the schema stays replayable on a live store.
+-- last_checked_at: when this was last looked up against the outside world.
+alter table flow.entries add column if not exists last_checked_at timestamptz;
+-- source: who wrote a note. 'me' is the user's own thinking and is never
+-- rewritten by anything automated; 'research' is dated, sourced, and additive.
+alter table flow.notes   add column if not exists source text not null default 'me';
+
 -- links: "this thought is about that person", "she recommended this film"
 create table if not exists flow.links (
   id         uuid primary key default gen_random_uuid(),
@@ -99,6 +106,15 @@ $$;
 create or replace function flow.tg_touch() returns trigger
 language plpgsql as $$
 begin
+  -- Checking a link against the world is not an edit to it. If the only thing
+  -- that moved is last_checked_at, leave updated_at alone — otherwise every
+  -- catch-up would mark the entry's embedding stale for no reason.
+  if new.last_checked_at is distinct from old.last_checked_at
+     and (to_jsonb(new) - 'updated_at' - 'last_checked_at')
+       = (to_jsonb(old) - 'updated_at' - 'last_checked_at') then
+    new.updated_at := old.updated_at;
+    return new;
+  end if;
   new.updated_at := now();
   return new;
 end;

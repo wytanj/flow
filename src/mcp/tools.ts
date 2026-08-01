@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
+import { catchUpEntry, shelfQueue } from '../core/catchup.js'
 import * as flow from '../core/flow.js'
 import { formatEntryFull, formatEntryLine, formatList, formatSearch } from '../core/format.js'
 import { DATA_HINTS, KINDS } from '../core/kinds.js'
@@ -303,6 +304,44 @@ export function createFlowServer(): McpServer {
         ]
           .filter(Boolean)
           .join('\n'),
+      )
+    }),
+  )
+
+  server.registerTool(
+    'flow_catch_up',
+    {
+      title: 'Catch up on what changed',
+      description:
+        'Look up what has happened in the world to something already saved — "what\'s up with these ' +
+        'guys?". Searches the web, then appends what it finds as a dated, sourced note. Pass a shelf ' +
+        'to sweep everything on it, oldest-checked first. Append-only: it never rewrites titles, ' +
+        'tags or shelves, it only reports. Slow — a few seconds per entry.',
+      inputSchema: {
+        id: z.string().optional().describe('One entry: full id, short id, or exact title'),
+        shelf: z.string().optional().describe('A shelf (tag) to sweep instead'),
+        limit: z.number().int().min(1).max(10).optional().describe('Max entries when sweeping a shelf. Default 5.'),
+      },
+    },
+    guard(async ({ id, shelf, limit }) => {
+      if (!id && !shelf) return text('Give either an entry id or a shelf.')
+
+      const targets = shelf
+        ? (await shelfQueue(shelf, limit ?? 5)).map((e) => e.id)
+        : [await flow.resolveId(id!)]
+      if (!targets.length) return text(`Nothing on a shelf called "${shelf}".`)
+
+      const lines: string[] = []
+      for (const target of targets) {
+        const r = await catchUpEntry(target)
+        lines.push(
+          r.changed
+            ? `**${r.title}**\n${r.note}`
+            : `**${r.title}** — nothing new${r.skipped ? ` (${r.skipped})` : ''}`,
+        )
+      }
+      return text(
+        `Checked ${targets.length} ${targets.length === 1 ? 'entry' : 'entries'}:\n\n${lines.join('\n\n')}`,
       )
     }),
   )

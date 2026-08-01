@@ -19,6 +19,7 @@ export interface Entry {
   archived_at: string | null
   created_at: string
   updated_at: string
+  last_checked_at: string | null
 }
 
 export interface Note {
@@ -26,6 +27,8 @@ export interface Note {
   entry_id: string
   body: string
   created_at: string
+  /** me = your own thinking; research = looked up, dated and sourced. */
+  source: string
 }
 
 export interface LinkedEntry {
@@ -35,7 +38,7 @@ export interface LinkedEntry {
 }
 
 const COLS = `id, kind, title, body, data, tags, status, rating,
-  occurred_at, remind_at, source, archived_at, created_at, updated_at`
+  occurred_at, remind_at, source, archived_at, created_at, updated_at, last_checked_at`
 
 // pg_trgm may not be installable on every project; probe once and degrade to
 // plain full-text + ILIKE if it is missing.
@@ -201,7 +204,7 @@ export async function getEntry(id: string): Promise<
 
   const [notes, links] = await Promise.all([
     q<Note>(
-      `select id, entry_id, body, created_at from flow.notes
+      `select id, entry_id, body, created_at, source from flow.notes
         where entry_id = $1 order by created_at asc`,
       [id],
     ),
@@ -486,13 +489,14 @@ export async function updateEntry(id: string, patch: UpdateInput): Promise<Entry
   return entry
 }
 
-export async function addNote(entryId: string, body: string): Promise<Note> {
+/** `source` marks provenance: 'me' is your own thinking, 'research' is looked up. */
+export async function addNote(entryId: string, body: string, source = 'me'): Promise<Note> {
   const text = body.trim()
   if (!text) throw new Error('Note body is empty.')
   const note = await q1<Note>(
-    `insert into flow.notes (entry_id, body) values ($1, $2)
-     returning id, entry_id, body, created_at`,
-    [entryId, text],
+    `insert into flow.notes (entry_id, body, source) values ($1, $2, $3)
+     returning id, entry_id, body, created_at, source`,
+    [entryId, text, source],
   )
   if (!note) throw new Error('note failed')
   return note

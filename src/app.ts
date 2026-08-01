@@ -15,6 +15,8 @@ import { z } from 'zod'
 import { ask } from './ai/ask.js'
 import { smartCapture } from './ai/extract.js'
 import { AiUnavailable, aiEnabled } from './ai/llm.js'
+import { researchEnabled } from './ai/research.js'
+import { catchUpEntry, shelfQueue } from './core/catchup.js'
 import { embeddingsConfigured } from './embeddings/provider.js'
 import { status as embeddingStatus } from './embeddings/store.js'
 import * as flow from './core/flow.js'
@@ -45,6 +47,7 @@ export function createApp(): Hono {
       ai: aiEnabled(),
       telegram: telegramEnabled(),
       embeddings: embeddingsConfigured(),
+      research: researchEnabled(),
     }),
   )
 
@@ -173,6 +176,20 @@ export function createApp(): Hono {
   app.get('/briefing', async (c) => c.json(await flow.briefing()))
   app.get('/stats', async (c) => c.json(await flow.stats()))
   app.get('/shelves', async (c) => c.json({ shelves: await flow.shelves() }))
+
+  // Catch-up is one entry per request on purpose: each call stays inside a
+  // serverless timeout, and the caller drives the loop so progress is real
+  // rather than a spinner over an opaque batch.
+  app.post('/entries/:id/catchup', async (c) => {
+    const id = await flow.resolveId(c.req.param('id'))
+    return c.json(await catchUpEntry(id))
+  })
+
+  /** The queue for a shelf: what to check, oldest-checked first. */
+  app.get('/shelves/:tag/queue', async (c) => {
+    const entries = await shelfQueue(c.req.param('tag'))
+    return c.json({ shelf: c.req.param('tag'), entries, research: researchEnabled() })
+  })
 
   app.patch('/shelves/:tag', async (c) => {
     const { to } = await body(c, z.object({ to: z.string().min(1) }))

@@ -79,6 +79,22 @@
   #shelves .lbl { color: var(--faint); font-size: 12px; align-self: center; margin-right: 2px; }
   #search { margin-bottom: 14px; }
 
+  /* shelf header — a shelf is a place, not just a filter */
+  #shelfbar { display: none; align-items: center; gap: 10px; flex-wrap: wrap;
+              padding: 11px 13px; margin-bottom: 14px;
+              background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  #shelfbar.on { display: flex; }
+  #shelfbar .name { font-weight: 600; }
+  #shelfbar .sub { color: var(--faint); font-size: 12px; flex: 1; }
+  #shelfbar button { font-size: 12px; padding: 5px 11px; }
+  #shelfbar progress { width: 100%; height: 3px; appearance: none; border: none; background: var(--line); }
+  #shelfbar progress::-webkit-progress-bar { background: var(--line); }
+  #shelfbar progress::-webkit-progress-value { background: var(--accent); }
+
+  .stale { color: var(--faint); font-size: 11px; }
+  .stale.never { color: var(--warn); }
+  .fresh { color: var(--good); font-size: 11px; }
+
   /* feed */
   .entry { border-bottom: 1px solid var(--line-soft); padding: 13px 2px; }
   .entry:last-child { border-bottom: none; }
@@ -99,8 +115,12 @@
   .entry .tags { color: var(--faint); font-size: 12px; margin-top: 5px; }
   .entry mark { background: none; color: var(--text); font-weight: 600; }
   .detail { margin-top: 10px; padding-left: 11px; border-left: 1px solid var(--line); }
-  .detail .note { color: var(--dim); font-size: 13px; margin-bottom: 6px; }
+  .detail .note { color: var(--dim); font-size: 13px; margin-bottom: 8px; }
   .detail .note time { color: var(--faint); }
+  /* research is dated and sourced; your own words must never look the same */
+  .detail .note.research { border-left: 2px solid var(--accent); padding-left: 9px; margin-left: -11px; }
+  .detail .note.research .who { color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  .detail .note a { color: var(--accent); }
   .detail .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
   .detail .acts button { font-size: 12px; padding: 4px 9px; }
   .detail .noteform { display: flex; gap: 6px; margin-top: 9px; }
@@ -147,6 +167,7 @@
 
   <nav id="filters"></nav>
   <nav id="shelves"></nav>
+  <div id="shelfbar"></div>
   <input type="text" id="search" placeholder="search everything" />
   <div id="feed"></div>
 </main>
@@ -160,6 +181,8 @@
   let view = 'all'
   let shelf = null
   let aiOn = true
+  let researchOn = false
+  let catchingUp = false
   let openId = null
 
   const VIEWS = [
@@ -192,6 +215,7 @@
     renderStats(stats)
     api('/health').then((h) => {
       aiOn = h.ai
+      researchOn = h.research
       if (!aiOn) $('hint').textContent = 'no model configured — saving text as-is'
     }).catch(() => {})
     renderFilters(); load(); $('input').focus()
@@ -312,6 +336,63 @@
     }
   }
 
+  // --- shelf bar ------------------------------------------------------------
+  function ago(ts) {
+    if (!ts) return null
+    const days = Math.floor((Date.now() - new Date(ts).getTime()) / 86400000)
+    if (days <= 0) return 'today'
+    if (days === 1) return 'yesterday'
+    if (days < 30) return days + 'd ago'
+    return Math.floor(days / 30) + 'mo ago'
+  }
+
+  function renderShelfBar(entries) {
+    const bar = $('shelfbar')
+    if (!shelf) { bar.className = ''; bar.innerHTML = ''; return }
+    bar.className = 'on'
+    const checked = entries.map((e) => e.last_checked_at).filter(Boolean)
+    const oldest = checked.length === entries.length
+      ? 'last caught up ' + ago(checked.sort()[0])
+      : (entries.length - checked.length) + ' never checked'
+    bar.innerHTML =
+      '<span class="name">' + esc(shelf) + '</span>' +
+      '<span class="sub">' + entries.length + (entries.length === 1 ? ' entry · ' : ' entries · ') + oldest + '</span>' +
+      '<button id="catchup"' + (researchOn ? '' : ' disabled title="no research provider configured"') + '>catch me up</button>'
+    const btn = bar.querySelector('#catchup')
+    if (btn && researchOn) btn.onclick = () => catchUpShelf(entries)
+  }
+
+  /**
+   * One request per entry. Keeps each call inside a serverless timeout and
+   * makes the progress bar mean something instead of spinning over a batch.
+   */
+  async function catchUpShelf(entries) {
+    if (catchingUp) return
+    catchingUp = true
+    const bar = $('shelfbar')
+    const sub = bar.querySelector('.sub')
+    const btn = bar.querySelector('#catchup')
+    btn.disabled = true
+    const bp = document.createElement('progress')
+    bp.max = entries.length; bp.value = 0
+    bar.append(bp)
+
+    let found = 0
+    for (const [i, e] of entries.entries()) {
+      sub.textContent = 'checking ' + (e.title || 'entry').slice(0, 40) + '… (' + (i + 1) + '/' + entries.length + ')'
+      try {
+        const r = await api('/entries/' + e.id + '/catchup', { method: 'POST', body: '{}' })
+        if (r.changed) found++
+      } catch (err) {
+        sub.textContent = err.message
+      }
+      bp.value = i + 1
+    }
+    sub.textContent = found ? found + ' updated' : 'nothing new'
+    catchingUp = false
+    setTimeout(() => load(), 900)
+  }
+
   let searchTimer
   $('search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => load(), 250) }
 
@@ -335,6 +416,7 @@
         entries = (await api('/entries?limit=50&kind=' + view)).entries
       }
       renderFeed(entries, focusId)
+      renderShelfBar(entries)
     } catch (err) {
       feed.innerHTML = '<div class="empty">' + esc(err.message) + '</div>'
     }
@@ -383,6 +465,12 @@
         '<span class="kind">' + esc(e.kind) + '</span>' +
         '<span class="title">' + esc(e.title || '(untitled)') + '</span>' +
         (e.status ? '<span class="status' + (DONE.includes(e.status) ? ' done' : '') + '">' + esc(e.status) + '</span>' : '') +
+        // only links can be caught up on, so only they get a staleness pill
+        (url && shelf
+          ? (e.last_checked_at
+              ? '<span class="stale">checked ' + ago(e.last_checked_at) + '</span>'
+              : '<span class="stale never">never checked</span>')
+          : '') +
         '<span class="kind">' + when + '</span>' +
       '</div>' +
       (bodyHtml ? '<div class="body">' + bodyHtml + '</div>' : '') +
@@ -413,8 +501,7 @@
     try { full = await api('/entries/' + e.id) }
     catch (err) { detail.innerHTML = '<div class="empty">' + esc(err.message) + '</div>'; return }
 
-    const notes = (full.notes || []).map((n) =>
-      '<div class="note"><time>' + n.created_at.slice(0, 10) + '</time> — ' + esc(n.body) + '</div>').join('')
+    const notes = (full.notes || []).map(noteHtml).join('')
     const links = (full.links || []).map((l) =>
       '<div class="note">' + (l.direction === 'out' ? '→ ' : '← ') + esc(l.rel) + ': ' + esc(l.entry.title || 'untitled') + '</div>').join('')
 
@@ -455,6 +542,26 @@
         } catch (err) { alert(err.message) }
       }
     }
+  }
+
+  /**
+   * Your own notes and looked-up ones must never be mistaken for each other —
+   * in a year you need to know which thoughts were yours.
+   */
+  function noteHtml(n) {
+    const research = n.source === 'research'
+    const body = esc(n.body)
+      // citations arrive as [[1]](url)
+      .replace(/\[\[(\d+)\]\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">[$1]</a>')
+      // and the trailing Sources: line is bare urls
+      .replace(/(?<!["'>])(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>')
+      .replace(/\n/g, '<br>')
+    return (
+      '<div class="note' + (research ? ' research' : '') + '">' +
+      (research ? '<span class="who">looked up</span> ' : '') +
+      '<time>' + n.created_at.slice(0, 10) + '</time> — ' + body +
+      '</div>'
+    )
   }
 
   function esc(s) {

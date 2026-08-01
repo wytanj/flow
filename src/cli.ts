@@ -10,6 +10,7 @@
  */
 import { ask } from './ai/ask.js'
 import { smartCapture } from './ai/extract.js'
+import { catchUpEntry, shelfQueue } from './core/catchup.js'
 import * as flow from './core/flow.js'
 import { formatEntryLine, formatList, formatSearch } from './core/format.js'
 import { closePool } from './db.js'
@@ -42,6 +43,7 @@ const HELP = `flow — personal memory
   flow <kind> "<title>" [--body]   capture a typed memory (${KINDS.join(', ')})
   flow jot "<anything>"            let a model structure it — may create several entries
   flow ask "<question>"            answer a question from your own memory
+  flow catchup <shelf|id>          look up what changed in the world, note it
   flow recall <query>              search everything
   flow list [--kind k]             recent entries
   flow watchlist [--all]           movies still to watch
@@ -78,6 +80,21 @@ async function main() {
       console.log(res.answer)
       if (res.sources.length) {
         console.log(`\nfrom ${res.sources.length} entries · searched: ${res.searched.join(', ')}`)
+      }
+      return
+    }
+    case 'catchup': {
+      const target = tail.join(' ')
+      if (!target) { console.log('Give a shelf or an entry.'); return }
+      const shelfEntries = await shelfQueue(target, Number(flags.limit) || 10)
+      const ids = shelfEntries.length ? shelfEntries.map((e) => e.id) : [await flow.resolveId(target)]
+      for (const id of ids) {
+        const r = await catchUpEntry(id)
+        if (r.changed) {
+          console.log(`\n${r.title}\n  ${r.note?.replace(/\n/g, '\n  ')}`)
+        } else {
+          console.log(`\n${r.title} — nothing new${r.skipped ? ` (${r.skipped})` : ''}`)
+        }
       }
       return
     }
