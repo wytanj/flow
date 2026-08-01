@@ -11,5 +11,11 @@
       "source": "/(.*)",
       "destination": "/api/index"
     }
+  ],
+  "crons": [
+    {
+      "path": "/integrations/github/sync",
+      "schedule": "0 6 * * *"
+    }
   ]
 }

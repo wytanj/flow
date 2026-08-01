@@ -205,15 +205,20 @@ export function createApp(): Hono {
   // --- integrations --------------------------------------------------------
   app.get('/integrations', (c) => c.json({ integrations: listIntegrations() }))
 
-  app.post('/integrations/:name/sync', async (c) => {
-    const integration = getIntegration(c.req.param('name'))
+  // GET as well as POST because scheduled runners (Vercel cron among them)
+  // only issue GETs. Defensible here: sync is idempotent by construction, so
+  // calling it twice is the same as calling it once.
+  const syncHandler = async (c: Context) => {
+    const integration = getIntegration(c.req.param('name') ?? '')
     if (!integration) throw new HTTPException(404, { message: 'No such integration' })
     if (!integration.configured()) {
       throw new HTTPException(400, { message: `Not configured — needs ${integration.requires}` })
     }
     const limit = Number(c.req.query('limit'))
     return c.json(await integration.sync({ limit: Number.isFinite(limit) && limit > 0 ? limit : undefined }))
-  })
+  }
+  app.post('/integrations/:name/sync', syncHandler)
+  app.get('/integrations/:name/sync', syncHandler)
 
   /** Starred repos and anything else collected but not yet thought about. */
   app.get('/repos', async (c) => {
