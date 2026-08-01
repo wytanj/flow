@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { catchUpEntry, shelfQueue } from '../core/catchup.js'
+import { formatSuggestion, suggestShelves } from '../ai/shelve.js'
 import { formatPatterns, promptPatterns, recentPrompts } from '../core/prompts.js'
 import { getIntegration, listIntegrations } from '../integrations/index.js'
 import * as flow from '../core/flow.js'
@@ -86,6 +87,9 @@ export function createFlowServer(): McpServer {
         'body; anything produced by a model or copied from elsewhere goes in a note with source set',
         'to its origin. Use flow_capture_many for a handover covering several subjects: one entry',
         'per subject, one for the analysis, links between them, in a single call.',
+        '',
+        'Before tagging anything, check flow_shelves — reusing an existing shelf beats coining a',
+        'near-synonym. If the user cannot place something, flow_where suggests where it belongs.',
         '',
         'Recall with flow_recall before saying you do not know something about the user.',
         'Entry references accept a full id, the short id shown in listings, or an exact title.',
@@ -523,6 +527,48 @@ export function createFlowServer(): McpServer {
       return text(
         `Checked ${targets.length} ${targets.length === 1 ? 'entry' : 'entries'}:\n\n${lines.join('\n\n')}`,
       )
+    }),
+  )
+
+  server.registerTool(
+    'flow_shelves',
+    {
+      title: 'The shelves that exist',
+      description:
+        'Every shelf with its count and a sample of what is on it. Check this BEFORE tagging ' +
+        'anything: reusing the shelf the user already has is almost always right, and inventing a ' +
+        'near-synonym (web3 when they use crypto) fragments their store in a way they will not ' +
+        'notice until things go missing. Shelves nest with a slash.',
+      inputSchema: {},
+    },
+    guard(async () => {
+      const all = await flow.shelves()
+      if (!all.length) return text('No shelves yet.')
+      const lines = await Promise.all(
+        all.map(async (s) => {
+          const sample = await flow.listEntries({ tags: [s.tag], limit: 3 })
+          return `${'  '.repeat(s.depth)}${s.tag} (${s.count}) — ${sample.map((e) => e.title ?? '?').join(' · ')}`
+        }),
+      )
+      return text(lines.join('\n'))
+    }),
+  )
+
+  server.registerTool(
+    'flow_where',
+    {
+      title: 'Where should this go?',
+      description:
+        'For something already saved that the user could not place. Looks at every shelf and what ' +
+        'is on it, then suggests where this belongs, which entries it sits beside, and whether a ' +
+        'new shelf is genuinely warranted. Use when they say they do not know how to file ' +
+        'something, or ask what to tag it. Suggests only — it does not apply anything.',
+      inputSchema: { id: z.string().describe('Full id, short id, or exact title') },
+    },
+    guard(async ({ id }) => {
+      const entry = await flow.getEntry(await flow.resolveId(id))
+      if (!entry) return text('Not found.')
+      return text(`${entry.title}\n\n${formatSuggestion(await suggestShelves(entry))}`)
     }),
   )
 

@@ -16,6 +16,7 @@ import { ask } from './ai/ask.js'
 import { smartCapture } from './ai/extract.js'
 import { AiUnavailable, aiEnabled } from './ai/llm.js'
 import { researchEnabled, researchMode } from './ai/research.js'
+import { suggestShelves } from './ai/shelve.js'
 import { catchUpEntry, shelfQueue } from './core/catchup.js'
 import { embeddingsConfigured } from './embeddings/provider.js'
 import { getIntegration, listIntegrations } from './integrations/index.js'
@@ -130,6 +131,18 @@ export function createApp(): Hono {
   app.get('/recent', async (c) =>
     c.json({ entries: await flow.recentlyEngaged(Number(c.req.query('limit')) || 50) }),
   )
+
+  /** Saved but never filed. The safety net for "I'll decide later". */
+  app.get('/unfiled', async (c) =>
+    c.json({ entries: await flow.unfiled(Number(c.req.query('limit')) || 50) }),
+  )
+
+  /** "Where should this go?" — asked of something already saved. */
+  app.post('/entries/:id/where', async (c) => {
+    const entry = await flow.getEntry(await flow.resolveId(c.req.param('id')))
+    if (!entry) throw new HTTPException(404, { message: 'Not found' })
+    return c.json(await suggestShelves(entry))
+  })
 
   /** Collected elsewhere, not yet thought about. Kept out of /recent. */
   app.get('/collected', async (c) =>

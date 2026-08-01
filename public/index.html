@@ -195,6 +195,8 @@ nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 12px; }
 .dayhead { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; font-weight: 700;
            color: var(--faint); padding: 16px 2px 6px; border-bottom: 1px solid var(--line-soft); }
 .dayhead:first-child { padding-top: 2px; }
+.whereout { margin-top: 10px; font-size: 12px; color: var(--dim); line-height: 2.1; }
+.whereout .why { color: var(--faint); }
 .empty { color: var(--faint); padding: 26px 2px; text-align: center; font-size: 13px; }
 .spin { color: var(--faint); padding: 20px 2px; font-size: 13px; }
 [hidden] { display: none !important; }
@@ -315,7 +317,7 @@ nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 12px; }
   let openId = null
 
   const VIEWS = [
-    ['recent', 'recent'], ['all', 'all'], ['due', 'due'], ['collected', 'collected'],
+    ['recent', 'recent'], ['all', 'all'], ['due', 'due'], ['unfiled', 'unfiled'], ['collected', 'collected'],
     ['thought', 'thoughts'], ['movie', 'watchlist'], ['person', 'people'],
     ['reading', 'reading'], ['repo', 'repos'], ['task', 'tasks'], ['idea', 'ideas'],
   ]
@@ -574,6 +576,8 @@ nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 12px; }
         entries = (await api('/entries?limit=50&tags=' + encodeURIComponent(shelf))).entries
       } else if (view === 'recent') {
         entries = (await api('/recent?limit=50')).entries
+      } else if (view === 'unfiled') {
+        entries = (await api('/unfiled?limit=50')).entries
       } else if (view === 'collected') {
         entries = (await api('/collected?limit=50')).entries
       } else if (view === 'due') {
@@ -595,7 +599,7 @@ nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 12px; }
   function renderFeed(entries, focusId) {
     const feed = $('feed')
     if (!entries.length) {
-      feed.innerHTML = '<div class="empty">' + ($('search').value.trim() ? 'nothing matches' : view === 'collected' ? 'nothing collected and unread' : 'nothing here yet') + '</div>'
+      feed.innerHTML = '<div class="empty">' + ($('search').value.trim() ? 'nothing matches' : view === 'collected' ? 'nothing collected and unread' : view === 'unfiled' ? 'everything is filed'  : 'nothing here yet') + '</div>'
       return
     }
     feed.innerHTML = ''
@@ -705,9 +709,11 @@ nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 12px; }
       '<form class="noteform"><input type="text" placeholder="add a thought…" /><button type="submit">add</button></form>' +
       '<div class="acts">' +
         (isDone ? '' : '<button data-act="done">mark ' + doneLabel + '</button>') +
+        '<button data-act="where">where?</button>' +
         '<button data-act="archive">archive</button>' +
         '<button data-act="delete">delete</button>' +
-      '</div>'
+      '</div>' +
+      '<div class="whereout" hidden></div>'
 
     detail.querySelector('.noteform').onsubmit = async (ev) => {
       ev.preventDefault()
@@ -725,6 +731,43 @@ nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 12px; }
     for (const b of detail.querySelectorAll('[data-act]')) {
       b.onclick = async () => {
         const act = b.dataset.act
+        if (act === 'where') {
+          // suggests only — applying a shelf stays your decision, one tap away
+          const out = detail.querySelector('.whereout')
+          out.hidden = false
+          out.textContent = 'looking at your shelves…'
+          b.disabled = true
+          try {
+            const s = await api('/entries/' + e.id + '/where', { method: 'POST', body: '{}' })
+            out.innerHTML =
+              (s.existing.length
+                ? s.existing
+                    .map(
+                      (x) =>
+                        '<button class="chip" style="--h:' + hueForTag(x.tag) + '" data-tag="' + esc(x.tag) + '">+ ' +
+                        esc(x.tag) + '</button> <span class="why">' + esc(x.why) + '</span>',
+                    )
+                    .join('<br>')
+                : '<span class="why">nothing you have fits it well</span>') +
+              (s.new_shelf
+                ? '<br><button class="chip" style="--h:' + hueForTag(s.new_shelf.tag) + '" data-tag="' +
+                  esc(s.new_shelf.tag) + '">+ ' + esc(s.new_shelf.tag) + ' (new)</button> <span class="why">' +
+                  esc(s.new_shelf.why) + '</span>'
+                : '') +
+              (s.neighbours.length ? '<div class="why">beside: ' + esc(s.neighbours.join(' · ')) + '</div>' : '')
+            for (const chip of out.querySelectorAll('[data-tag]')) {
+              chip.onclick = async () => {
+                await api('/entries/' + e.id, { method: 'PATCH', body: JSON.stringify({ add_tags: [chip.dataset.tag] }) })
+                load()
+              }
+            }
+          } catch (err) {
+            out.textContent = err.message
+          } finally {
+            b.disabled = false
+          }
+          return
+        }
         if (act === 'delete' && !confirm('Delete "' + (full.title || 'this entry') + '" permanently?')) return
         try {
           if (act === 'delete') await api('/entries/' + e.id, { method: 'DELETE' })

@@ -779,6 +779,22 @@ export async function recentlyEngaged(limit = 50): Promise<Entry[]> {
 }
 
 /**
+ * Saved but never filed. Untouched imports are excluded — a starred repo has
+ * no tags by design, and 51 of them would drown the handful you genuinely
+ * could not place.
+ */
+export async function unfiled(limit = 50): Promise<Entry[]> {
+  return q<Entry>(
+    `select ${COLS} from flow.entries
+      where archived_at is null
+        and coalesce(array_length(tags, 1), 0) = 0
+        and (status is null or status <> all($1::text[]))
+      order by created_at desc limit $2`,
+    [UNTOUCHED_STATUSES, clampLimit(limit)],
+  )
+}
+
+/**
  * Things collected elsewhere and not yet engaged with — starred repos, imported
  * bookmarks. Kept separate from authored memories so they cannot bury them.
  */
