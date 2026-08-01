@@ -12,9 +12,9 @@ import { createApp } from '../src/app.js'
 
 export const config = {
   runtime: 'nodejs',
-  // Recall makes two model round trips plus several searches; the default 10s
-  // would cut a legitimate question off midway.
-  maxDuration: 60,
+  // Catch-up runs a hosted search agent over several queries — tens of
+  // seconds, sometimes more. Anything less truncates it into a 504.
+  maxDuration: 300,
 }
 
 const app = createApp()

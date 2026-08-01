@@ -119,15 +119,21 @@ export async function catchUpEntry(entryId: string): Promise<CatchUpResult> {
     await addNote(entry.id, withSources, 'research')
   }
 
-  const row = await q1<{ last_checked_at: string }>(
-    `update flow.entries set last_checked_at = now() where id = $1 returning last_checked_at`,
-    [entry.id],
-  )
+  // Only record a check that actually happened. Stamping last_checked_at after
+  // a timeout would quietly retire the entry from the queue without ever
+  // having looked at it — the one outcome worse than a slow catch-up.
+  const failed = Boolean(skipped) && skipped !== 'no research provider configured'
+  const row = failed
+    ? null
+    : await q1<{ last_checked_at: string }>(
+        `update flow.entries set last_checked_at = now() where id = $1 returning last_checked_at`,
+        [entry.id],
+      )
 
   return {
     entry_id: entry.id,
     title: entry.title,
-    checked_at: row?.last_checked_at ?? new Date().toISOString(),
+    checked_at: row?.last_checked_at ?? entry.last_checked_at ?? '',
     changed: Boolean(noteBody),
     note: noteBody,
     citations,

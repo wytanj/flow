@@ -42,8 +42,21 @@ export function researchEnabled(): boolean {
   return /(^|\/\/)(api\.)?(x\.ai|openai\.com)/.test(baseUrl())
 }
 
+/**
+ * A hosted search agent runs several queries per question, so this is tens of
+ * seconds, not one round trip. The timeout must sit *below* the platform's
+ * function limit — otherwise the platform kills the request and the caller
+ * gets an opaque 504 instead of a handled failure.
+ */
+function budgetMs(): number {
+  const env = Number(process.env.FLOW_RESEARCH_TIMEOUT_MS)
+  if (Number.isFinite(env) && env > 0) return env
+  const fnLimit = Number(process.env.FLOW_FUNCTION_MAX_SECONDS ?? (process.env.VERCEL ? 300 : 0))
+  return fnLimit > 0 ? Math.max(20_000, (fnLimit - 20) * 1000) : 180_000
+}
+
 /** Whatever the web says, with its sources. Returns null if search is unavailable. */
-export async function research(prompt: string, timeoutMs = 120_000): Promise<ResearchResult | null> {
+export async function research(prompt: string, timeoutMs = budgetMs()): Promise<ResearchResult | null> {
   if (!researchEnabled()) return null
 
   const res = await fetch(`${baseUrl()}/responses`, {
