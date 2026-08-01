@@ -21,6 +21,7 @@ import { embeddingsConfigured } from './embeddings/provider.js'
 import { getIntegration, listIntegrations } from './integrations/index.js'
 import { status as embeddingStatus } from './embeddings/store.js'
 import * as flow from './core/flow.js'
+import { type Surface, logged, promptPatterns, recentPrompts } from './core/prompts.js'
 import { createFlowServer } from './mcp/tools.js'
 import { handleTelegramUpdate, telegramEnabled } from './telegram/webhook.js'
 
@@ -104,11 +105,16 @@ export function createApp(): Hono {
     const input = contentType.includes('text/plain')
       ? { body: await c.req.text(), source: 'api' }
       : await body(c, captureSchema)
-    const result = await flow.capture({
-      ...input,
-      source: input.source ?? 'api',
-      capture_id: idempotencyKey(c, input),
-    })
+    const result = await logged(
+      { surface: surfaceOf(c), action: 'capture', input: input.body ?? input.title ?? null },
+      () =>
+        flow.capture({
+          ...input,
+          source: input.source ?? 'api',
+          capture_id: idempotencyKey(c, input),
+        }),
+      (r) => [r.entry],
+    )
     // 200 rather than 201 on a replay, so a client can tell it was a no-op
     return c.json(result, result.created ? 201 : 200)
   })
@@ -239,7 +245,11 @@ export function createApp(): Hono {
     const parsed = contentType.includes('text/plain')
       ? { text: await c.req.text(), capture_id: undefined }
       : await body(c, z.object({ text: z.string().min(1), capture_id: z.string().optional() }))
-    const result = await smartCapture(parsed.text, 'api', idempotencyKey(c, parsed))
+    const result = await logged(
+      { surface: surfaceOf(c), action: 'jot', input: parsed.text },
+      () => smartCapture(parsed.text, 'api', idempotencyKey(c, parsed)),
+      (r) => r.entries,
+    )
     return c.json(result, result.entries.length ? 201 : 200)
   })
 
@@ -249,14 +259,28 @@ export function createApp(): Hono {
       c,
       z.object({ question: z.string().min(1), kind: z.string().optional() }),
     )
-    return c.json(await ask(question, { kind }))
+    return c.json(
+      await logged({ surface: surfaceOf(c), action: 'ask', input: question }, () => ask(question, { kind })),
+    )
   })
 
   app.get('/ask', async (c) => {
     const question = c.req.query('q') ?? ''
     if (!question) throw new HTTPException(400, { message: 'Pass ?q=' })
-    return c.json(await ask(question, { kind: c.req.query('kind') }))
+    return c.json(
+      await logged({ surface: surfaceOf(c), action: 'ask', input: question }, () =>
+        ask(question, { kind: c.req.query('kind') }),
+      ),
+    )
   })
+
+  // --- prompt log ----------------------------------------------------------
+  app.get('/prompts', async (c) => {
+    const limit = Number(c.req.query('limit')) || 50
+    return c.json({ prompts: await recentPrompts(limit, c.req.query('surface')) })
+  })
+
+  app.get('/prompts/patterns', async (c) => c.json(await promptPatterns()))
 
   // --- errors --------------------------------------------------------------
   app.notFound((c) => c.json({ error: 'No such route' }, 404))
@@ -285,6 +309,12 @@ function idempotencyKey(
   input: { capture_id?: string | null },
 ): string | null {
   return input.capture_id?.trim() || c.req.header('idempotency-key')?.trim() || null
+}
+
+/** The web app identifies itself so its prompts can be told from a script's. */
+function surfaceOf(c: { req: { header: (k: string) => string | undefined } }): Surface {
+  const s = c.req.header('x-flow-surface')?.trim().toLowerCase()
+  return s === 'web' || s === 'cli' || s === 'telegram' || s === 'mcp' ? s : 'api'
 }
 
 function bearerFrom(header: string | undefined): string | null {

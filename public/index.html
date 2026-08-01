@@ -320,7 +320,7 @@ nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 12px; }
   async function api(path, opts = {}) {
     const res = await fetch(path, {
       ...opts,
-      headers: { authorization: 'Bearer ' + token, ...(opts.body ? { 'content-type': 'application/json' } : {}), ...opts.headers },
+      headers: { authorization: 'Bearer ' + token, 'x-flow-surface': 'web', ...(opts.body ? { 'content-type': 'application/json' } : {}), ...opts.headers },
     })
     if (res.status === 401) { lock(); throw new Error('unauthorized') }
     const data = await res.json().catch(() => ({}))

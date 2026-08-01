@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { catchUpEntry, shelfQueue } from '../core/catchup.js'
+import { formatPatterns, promptPatterns, recentPrompts } from '../core/prompts.js'
 import { getIntegration, listIntegrations } from '../integrations/index.js'
 import * as flow from '../core/flow.js'
 import { formatEntryFull, formatEntryLine, formatList, formatSearch } from '../core/format.js'
@@ -544,6 +545,39 @@ export function createFlowServer(): McpServer {
           ? `Renamed "${from}" to "${to}" on ${moved.length} ${moved.length === 1 ? 'entry' : 'entries'}:\n${formatList(moved)}`
           : `No entries are on a shelf called "${from}".`,
       )
+    }),
+  )
+
+  server.registerTool(
+    'flow_prompts',
+    {
+      title: 'How the user prompts',
+      description:
+        'The log of what the user actually said to flow, and a digest of the habits in it — how ' +
+        'often a saved link arrives with a reason attached, which shelves get reached for, when ' +
+        'they capture, what fails. Use this when asked to review or improve how they use flow, ' +
+        'or to tailor suggestions to how they actually write rather than how you assume they do.',
+      inputSchema: {
+        view: z.enum(['patterns', 'recent']).optional().describe('Default: patterns'),
+        surface: z.string().optional().describe('Filter recent by web | api | cli | telegram | mcp'),
+        limit: z.number().int().min(1).max(200).optional(),
+      },
+    },
+    guard(async ({ view, surface, limit }) => {
+      if (view === 'recent') {
+        const rows = await recentPrompts(limit ?? 30, surface)
+        if (!rows.length) return text('Nothing logged yet.')
+        return text(
+          rows
+            .map(
+              (r) =>
+                `${r.at.slice(0, 16)} [${r.surface}/${r.action}]${r.ok ? '' : ' FAILED'} ` +
+                `${r.entry_ids.length ? `→ ${r.entry_ids.length} entries ` : ''}\n  ${(r.input ?? '').slice(0, 220)}`,
+            )
+            .join('\n'),
+        )
+      }
+      return text(formatPatterns(await promptPatterns()))
     }),
   )
 

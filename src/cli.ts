@@ -11,6 +11,7 @@
 import { ask } from './ai/ask.js'
 import { smartCapture } from './ai/extract.js'
 import { catchUpEntry, shelfQueue } from './core/catchup.js'
+import { formatPatterns, promptPatterns, recentPrompts } from './core/prompts.js'
 import * as flow from './core/flow.js'
 import { formatEntryLine, formatList, formatSearch } from './core/format.js'
 import { closePool } from './db.js'
@@ -50,6 +51,7 @@ const HELP = `flow — personal memory
   flow people [query]              remembered people
   flow due [--days n]              reminders that have landed
   flow brief                       everything at a glance
+  flow prompts [--recent]          how you have been prompting flow
 
   flags: --tags a,b  --body text  --status s  --rating n  --remind <iso>  --limit n
 `
@@ -96,6 +98,17 @@ async function main() {
           console.log(`\n${r.title} — nothing new${r.skipped ? ` (${r.skipped})` : ''}`)
         }
       }
+      return
+    }
+    case 'prompts': {
+      if (flags.recent) {
+        for (const r of await recentPrompts(limit ?? 30, flags.surface)) {
+          console.log(`${r.at.slice(0, 16)} [${r.surface}/${r.action}]${r.ok ? '' : ' FAILED'}`)
+          console.log(`   ${(r.input ?? '').replace(/\n/g, ' ').slice(0, 150)}`)
+        }
+        return
+      }
+      console.log(formatPatterns(await promptPatterns()))
       return
     }
     case 'recall': {

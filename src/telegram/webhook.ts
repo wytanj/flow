@@ -15,6 +15,7 @@ import { ask } from '../ai/ask.js'
 import { smartCapture } from '../ai/extract.js'
 import * as flow from '../core/flow.js'
 import { formatList } from '../core/format.js'
+import { logged } from '../core/prompts.js'
 
 export function telegramEnabled(): boolean {
   return Boolean(process.env.TELEGRAM_BOT_TOKEN)
@@ -76,7 +77,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<void
     if (text.startsWith('?') || text.startsWith('/ask')) {
       const question = text.replace(/^(\?|\/ask)\s*/, '')
       if (!question) return void (await send(chatId, 'Ask me something about what you have saved.'))
-      const res = await ask(question)
+      const res = await logged({ surface: 'telegram', action: 'ask', input: question }, () => ask(question))
       return void (await send(chatId, res.answer))
     }
 
@@ -98,7 +99,11 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<void
       return void (await send(chatId, formatList(await flow.due(7), 'Nothing due.')))
     }
 
-    const { entries, duplicates } = await smartCapture(text, 'telegram')
+    const { entries, duplicates } = await logged(
+      { surface: 'telegram', action: 'telegram_capture', input: text },
+      () => smartCapture(text, 'telegram'),
+      (r) => r.entries,
+    )
     const summary = entries
       .map((e) => `• *${e.title ?? 'untitled'}* — ${e.kind}${e.status ? ` · ${e.status}` : ''}`)
       .join('\n')

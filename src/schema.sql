@@ -77,6 +77,26 @@ create table if not exists flow.links (
   check (from_id <> to_id)
 );
 
+-- prompts: what was actually said to flow, before anything interpreted it.
+-- Kept so the phrasing itself can be studied — which shelves get reached for,
+-- whether a link arrives with a reason attached, how a thought is worded at
+-- 2am versus at a desk. The entries are the memory; this is the behaviour.
+create table if not exists flow.prompts (
+  id        uuid primary key default gen_random_uuid(),
+  at        timestamptz not null default now(),
+  surface   text not null,                       -- web | api | cli | telegram | mcp
+  action    text not null,                       -- jot | capture | ask | flow_capture | …
+  input     text,                                -- verbatim, before any parsing
+  entry_ids uuid[] not null default '{}',
+  tags      text[] not null default '{}',
+  kinds     text[] not null default '{}',
+  ms        int,
+  ok        boolean not null default true,
+  error     text
+);
+create index if not exists prompts_at_idx      on flow.prompts (at desc);
+create index if not exists prompts_surface_idx on flow.prompts (surface, at desc);
+
 -- ---------------------------------------------------------------------------
 -- full-text search
 -- ---------------------------------------------------------------------------
