@@ -101,13 +101,17 @@ export async function capture(input: CaptureInput): Promise<CaptureResult> {
   const data: Record<string, unknown> = { ...(input.data ?? {}) }
   const tags = cleanTags(input.tags)
 
-  if (!title && !body) {
-    throw new Error('Nothing to capture: provide a title or a body.')
-  }
-
   // A shelved link: fetch what the page says about itself so the entry is
   // recognisable later, instead of being named after whatever word was nearby.
   const url = extractUrl(typeof data.url === 'string' ? data.url : null, body, title)
+
+  // A URL on its own is enough. Callers are told to omit the title for links
+  // precisely so the page can name itself, so rejecting that shape here would
+  // punish them for following the instructions.
+  if (!title && !body && !url) {
+    throw new Error('Nothing to capture: provide a title, a body, or a URL.')
+  }
+
   if (url && input.enrich !== false) {
     data.url = url
     // A link plus your take on it is a `reading`, not a stray thought — that is

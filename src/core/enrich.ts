@@ -50,6 +50,43 @@ export function isWeakTitle(title: string | null | undefined, tags: string[] = [
   return false
 }
 
+/**
+ * Titles that identify a page within a site but say nothing on their own. A
+ * docs page called "Overview" is indistinguishable from every other docs page
+ * called "Overview" once it is sitting on a shelf.
+ */
+const GENERIC_TITLES = new Set([
+  'overview', 'home', 'homepage', 'docs', 'documentation', 'introduction', 'intro',
+  'getting started', 'welcome', 'index', 'readme', 'about', 'blog', 'api', 'guide',
+  'reference', 'dashboard', 'login', 'sign in', 'untitled', 'faq', 'pricing',
+])
+
+// subdomains that describe a section rather than the thing itself
+const SUBDOMAINS = new Set(['docs', 'blog', 'app', 'www', 'developer', 'developers', 'help', 'support', 'en'])
+
+/** A human name for the site: og:site_name if it is a real name, else the domain. */
+function siteName(metaSite: string | undefined, url: string): string | undefined {
+  // og:site_name is sometimes just the hostname again, which is no better
+  if (metaSite && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(metaSite)) return metaSite
+  try {
+    const parts = new URL(url).hostname.replace(/^www\./, '').split('.').filter((p) => !SUBDOMAINS.has(p))
+    const label = parts.length > 1 ? parts[parts.length - 2] : parts[0]
+    return label ? label.charAt(0).toUpperCase() + label.slice(1) : metaSite
+  } catch {
+    return metaSite
+  }
+}
+
+/** "Overview" on docs.colossus.credit becomes "Colossus — Overview". */
+function qualifyTitle(title: string | undefined, site: string | undefined, url: string): string | undefined {
+  const t = title?.trim()
+  if (!t) return undefined
+  if (!GENERIC_TITLES.has(t.toLowerCase()) && t.length >= 8) return t
+  const name = siteName(site, url)
+  if (!name || t.toLowerCase().includes(name.toLowerCase())) return t
+  return `${name} — ${t}`
+}
+
 const ENTITIES: Record<string, string> = {
   amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'", '#x27': "'", mdash: '—', ndash: '–',
 }
@@ -130,12 +167,13 @@ export async function fetchLinkMeta(url: string, timeoutMs = 6_000): Promise<Lin
         : undefined)
 
     const description = meta(html, 'og:description', 'twitter:description', 'description')
-    const site = meta(html, 'og:site_name') ?? new URL(res.url || url).hostname.replace(/^www\./, '')
+    const finalUrl = res.url || url
+    const site = siteName(meta(html, 'og:site_name'), finalUrl)
     const author = meta(html, 'author', 'article:author')
 
     return {
-      url: res.url || url,
-      title: title?.slice(0, 200),
+      url: finalUrl,
+      title: qualifyTitle(title, site, finalUrl)?.slice(0, 200),
       description: description?.slice(0, 500),
       site,
       author: author?.slice(0, 120),
