@@ -1,0 +1,40 @@
+{
+  "name": "flow",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "description": "Personal AI memory — capture thoughts, watchlists, people and readings; recall them anywhere.",
+  "bin": {
+    "flow": "./src/cli.ts"
+  },
+  "scripts": {
+    "migrate": "tsx src/migrate.ts",
+    "mcp": "tsx src/mcp/server.ts",
+    "api": "tsx src/api/server.ts",
+    "dev": "tsx watch src/api/server.ts",
+    "flow": "tsx src/cli.ts",
+    "embeddings": "tsx scripts/embeddings.ts status",
+    "embeddings:sync": "tsx scripts/embeddings.ts sync",
+    "smoke": "node scripts/smoke-mcp.mjs",
+    "telegram:register": "node scripts/telegram-register.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/mcp": "^0.3.1",
+    "@hono/node-server": "^1.13.7",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "dotenv": "^16.4.7",
+    "hono": "^4.6.14",
+    "pg": "^8.13.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

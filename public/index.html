@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex" />
+<meta name="theme-color" content="#0b0b0c" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<title>flow</title>
+<style>
+  :root {
+    --bg: #0b0b0c; --panel: #141416; --line: #26262b; --line-soft: #1c1c20;
+    --text: #e8e8ea; --dim: #8a8a92; --faint: #5c5c66; --accent: #7aa2f7;
+    --good: #7bc99a; --warn: #e0a458;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 var(--mono);
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 20px 16px 96px; }
+
+  /* token gate */
+  #gate { display: grid; place-items: center; min-height: 100vh; padding: 24px; }
+  #gate form { width: 100%; max-width: 380px; }
+  #gate h1 { font-size: 20px; font-weight: 500; margin: 0 0 6px; }
+  #gate p { color: var(--dim); margin: 0 0 18px; font-size: 13px; }
+
+  input, textarea, button, select { font: inherit; color: inherit; }
+  input[type=password], input[type=text], textarea {
+    width: 100%; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 11px 13px; outline: none; resize: none;
+  }
+  input:focus, textarea:focus { border-color: #3a3a44; }
+  textarea::placeholder, input::placeholder { color: var(--faint); }
+
+  button { background: none; border: 1px solid var(--line); border-radius: 8px;
+           padding: 7px 13px; color: var(--dim); cursor: pointer; }
+  button:hover { color: var(--text); border-color: #3a3a44; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0b0b0c; font-weight: 500; }
+  button.primary:hover { filter: brightness(1.08); color: #0b0b0c; }
+  button.on { color: var(--text); border-color: #4a4a56; background: #1e1e24; }
+  button:disabled { opacity: .5; cursor: default; }
+
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  header b { font-weight: 600; letter-spacing: .02em; }
+  header .stats { color: var(--faint); font-size: 12px; flex: 1; }
+  header button { padding: 4px 9px; font-size: 12px; }
+
+  /* composer */
+  .composer textarea { min-height: 84px; font-size: 16px; }
+  .bar { display: flex; gap: 8px; margin-top: 9px; align-items: center; }
+  .bar .spacer { flex: 1; }
+  .modes { display: flex; gap: 0; }
+  .modes button { border-radius: 0; }
+  .modes button:first-child { border-radius: 8px 0 0 8px; }
+  .modes button:last-child { border-radius: 0 8px 8px 0; margin-left: -1px; }
+  .hint { color: var(--faint); font-size: 11px; margin-top: 7px; min-height: 15px; }
+  .hint.err { color: #e07a7a; }
+
+  /* answer */
+  #answer { margin: 16px 0; padding: 14px 16px; background: var(--panel);
+            border: 1px solid var(--line); border-left: 2px solid var(--accent); border-radius: 10px; }
+  #answer .a { white-space: pre-wrap; }
+  #answer .meta { color: var(--faint); font-size: 11px; margin-top: 10px; }
+  #answer cite { color: var(--accent); font-style: normal; cursor: pointer; }
+
+  /* filters */
+  nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 12px; }
+  nav button { padding: 5px 11px; font-size: 13px; }
+  #shelves { margin: -4px 0 12px; }
+  #shelves button { padding: 3px 9px; font-size: 12px; border-color: var(--line-soft); color: var(--faint); }
+  #shelves button:hover, #shelves button.on { color: var(--text); border-color: #4a4a56; }
+  #shelves button.on { background: #1e1e24; }
+  #shelves .lbl { color: var(--faint); font-size: 12px; align-self: center; margin-right: 2px; }
+  #search { margin-bottom: 14px; }
+
+  /* feed */
+  .entry { border-bottom: 1px solid var(--line-soft); padding: 13px 2px; }
+  .entry:last-child { border-bottom: none; }
+  .entry .head { display: flex; gap: 9px; align-items: baseline; cursor: pointer; }
+  .entry .title { flex: 1; min-width: 0; }
+  .entry .kind { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  .entry .status { color: var(--warn); font-size: 11px; }
+  .entry .status.done { color: var(--good); }
+  .entry .body { color: var(--dim); font-size: 13px; margin-top: 5px;
+                 overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .entry.open .body { -webkit-line-clamp: unset; white-space: pre-wrap; }
+  .entry .data { color: var(--faint); font-size: 12px; margin-top: 5px; }
+  .entry .summary { color: var(--faint); font-size: 12px; margin-top: 5px; font-style: italic;
+                    overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .entry.open .summary { -webkit-line-clamp: unset; }
+  .entry .link { display: inline-block; margin-top: 5px; font-size: 12px; color: var(--accent); text-decoration: none; }
+  .entry .link:hover { text-decoration: underline; }
+  .entry .tags { color: var(--faint); font-size: 12px; margin-top: 5px; }
+  .entry mark { background: none; color: var(--text); font-weight: 600; }
+  .detail { margin-top: 10px; padding-left: 11px; border-left: 1px solid var(--line); }
+  .detail .note { color: var(--dim); font-size: 13px; margin-bottom: 6px; }
+  .detail .note time { color: var(--faint); }
+  .detail .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
+  .detail .acts button { font-size: 12px; padding: 4px 9px; }
+  .detail .noteform { display: flex; gap: 6px; margin-top: 9px; }
+  .detail .noteform input { flex: 1; }
+
+  .empty { color: var(--faint); padding: 26px 2px; text-align: center; font-size: 13px; }
+  .spin { color: var(--faint); padding: 20px 2px; font-size: 13px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <form id="gateform">
+    <h1>flow</h1>
+    <p>Paste your API token. It stays in this browser.</p>
+    <input type="password" id="token" placeholder="FLOW_API_TOKEN" autocomplete="current-password" />
+    <div class="bar"><span class="spacer"></span><button class="primary" type="submit">unlock</button></div>
+    <div class="hint" id="gatehint"></div>
+  </form>
+</div>
+
+<main id="app" class="wrap" hidden>
+  <header>
+    <b>flow</b>
+    <span class="stats" id="stats"></span>
+    <button id="logout">lock</button>
+  </header>
+
+  <form class="composer" id="composer">
+    <textarea id="input" placeholder="what's on your mind?" autofocus></textarea>
+    <div class="bar">
+      <div class="modes">
+        <button type="button" class="on" data-mode="remember">remember</button>
+        <button type="button" data-mode="ask">ask</button>
+      </div>
+      <span class="spacer"></span>
+      <button class="primary" type="submit" id="send">save</button>
+    </div>
+    <div class="hint" id="hint">⌘/ctrl + enter</div>
+  </form>
+
+  <div id="answer" hidden></div>
+
+  <nav id="filters"></nav>
+  <nav id="shelves"></nav>
+  <input type="text" id="search" placeholder="search everything" />
+  <div id="feed"></div>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id)
+  const KEY = 'flow.token'
+  let token = localStorage.getItem(KEY) || ''
+  let mode = 'remember'
+  let view = 'all'
+  let shelf = null
+  let aiOn = true
+  let openId = null
+
+  const VIEWS = [
+    ['all', 'all'], ['due', 'due'], ['thought', 'thoughts'], ['movie', 'watchlist'],
+    ['person', 'people'], ['reading', 'reading'], ['task', 'tasks'], ['idea', 'ideas'],
+  ]
+
+  // --- api ------------------------------------------------------------------
+  async function api(path, opts = {}) {
+    const res = await fetch(path, {
+      ...opts,
+      headers: { authorization: 'Bearer ' + token, ...(opts.body ? { 'content-type': 'application/json' } : {}), ...opts.headers },
+    })
+    if (res.status === 401) { lock(); throw new Error('unauthorized') }
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || res.status + ' ' + res.statusText)
+    return data
+  }
+
+  // --- gate -----------------------------------------------------------------
+  function lock() {
+    localStorage.removeItem(KEY); token = ''
+    $('app').hidden = true; $('gate').hidden = false; $('token').focus()
+  }
+  async function unlock(t) {
+    token = t
+    const stats = await api('/stats')            // throws if the token is wrong
+    localStorage.setItem(KEY, t)
+    $('gate').hidden = true; $('app').hidden = false
+    renderStats(stats)
+    api('/health').then((h) => {
+      aiOn = h.ai
+      if (!aiOn) $('hint').textContent = 'no model configured — saving text as-is'
+    }).catch(() => {})
+    renderFilters(); load(); $('input').focus()
+  }
+
+  $('gateform').onsubmit = async (e) => {
+    e.preventDefault()
+    const t = $('token').value.trim()
+    if (!t) return
+    $('gatehint').textContent = 'checking…'
+    $('gatehint').className = 'hint'
+    try { await unlock(t) }
+    catch (err) { $('gatehint').textContent = err.message === 'unauthorized' ? 'that token was rejected' : err.message; $('gatehint').className = 'hint err' }
+  }
+  $('logout').onclick = lock
+
+  // --- composer -------------------------------------------------------------
+  for (const b of document.querySelectorAll('.modes button')) {
+    b.onclick = () => {
+      mode = b.dataset.mode
+      for (const x of document.querySelectorAll('.modes button')) x.classList.toggle('on', x === b)
+      $('send').textContent = mode === 'ask' ? 'ask' : 'save'
+      $('input').placeholder = mode === 'ask' ? 'ask about anything you have saved…' : "what's on your mind?"
+      $('input').focus()
+    }
+  }
+
+  $('input').onkeydown = (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); $('composer').requestSubmit() }
+  }
+
+  $('composer').onsubmit = async (e) => {
+    e.preventDefault()
+    const text = $('input').value.trim()
+    if (!text) return
+    const hint = $('hint')
+    hint.className = 'hint'
+    $('send').disabled = true
+    hint.textContent = mode === 'ask' ? 'thinking…' : 'saving…'
+    try {
+      if (mode === 'ask') {
+        const res = await api('/ask', { method: 'POST', body: JSON.stringify({ question: text }) })
+        showAnswer(res)
+        hint.textContent = ''
+      } else {
+        // /jot lets a model split and structure it; /capture is the plain fallback
+        const res = aiOn
+          ? await api('/jot', { method: 'POST', body: JSON.stringify({ text }) })
+          : { entries: [(await api('/capture', { method: 'POST', body: JSON.stringify({ body: text }) })).entry] }
+        const n = res.entries.length
+        hint.textContent = 'saved ' + (n > 1 ? n + ' entries' : res.entries[0].kind)
+        $('input').value = ''
+        $('answer').hidden = true
+        view = 'all'; renderFilters(); load()
+        api('/stats').then(renderStats).catch(() => {})
+      }
+    } catch (err) {
+      hint.textContent = err.message
+      hint.className = 'hint err'
+    } finally {
+      $('send').disabled = false
+      $('input').focus()
+    }
+  }
+
+  function showAnswer(res) {
+    const el = $('answer')
+    // link [abc12345] citations back to the entries they came from
+    const withCites = esc(res.answer).replace(/\[([0-9a-f]{8})\]/g, '<cite data-id="$1">[$1]</cite>')
+    el.innerHTML = '<div class="a">' + withCites + '</div>' +
+      '<div class="meta">' + (res.sources.length ? res.sources.length + ' entries considered · ' : '') +
+      'searched: ' + esc(res.searched.join(', ')) + '</div>'
+    el.hidden = false
+    for (const c of el.querySelectorAll('cite')) {
+      c.onclick = () => { $('search').value = ''; view = 'all'; renderFilters(); load(c.dataset.id) }
+    }
+  }
+
+  // --- feed -----------------------------------------------------------------
+  function renderStats(s) {
+    const bits = s.by_kind.slice(0, 4).map((k) => k.kind + ' ' + k.count)
+    $('stats').textContent = s.total ? s.total + ' saved · ' + bits.join(' · ') : 'nothing saved yet'
+  }
+
+  function renderFilters() {
+    $('filters').innerHTML = ''
+    for (const [key, label] of VIEWS) {
+      const b = document.createElement('button')
+      b.textContent = label
+      b.className = view === key && !shelf ? 'on' : ''
+      b.onclick = () => { view = key; shelf = null; $('search').value = ''; renderFilters(); load() }
+      $('filters').append(b)
+    }
+    renderShelves()
+  }
+
+  // Shelves are tags — the way links and thoughts on one subject group together.
+  async function renderShelves() {
+    const nav = $('shelves')
+    let list
+    try { list = (await api('/shelves')).shelves } catch { return }
+    nav.innerHTML = ''
+    if (!list.length) return
+    const lbl = document.createElement('span')
+    lbl.className = 'lbl'
+    lbl.textContent = 'shelves'
+    nav.append(lbl)
+    for (const s of list) {
+      const b = document.createElement('button')
+      b.textContent = s.tag + ' ' + s.count
+      b.className = shelf === s.tag ? 'on' : ''
+      b.onclick = () => {
+        shelf = shelf === s.tag ? null : s.tag
+        $('search').value = ''
+        renderFilters(); load()
+      }
+      nav.append(b)
+    }
+  }
+
+  let searchTimer
+  $('search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => load(), 250) }
+
+  async function load(focusId) {
+    const feed = $('feed')
+    feed.innerHTML = '<div class="spin">loading…</div>'
+    const q = $('search').value.trim()
+    try {
+      let entries
+      if (q) {
+        entries = (await api('/search?limit=50&q=' + encodeURIComponent(q))).results
+      } else if (shelf) {
+        entries = (await api('/entries?limit=50&tags=' + encodeURIComponent(shelf))).entries
+      } else if (view === 'due') {
+        entries = (await api('/due?within_days=14')).due
+      } else if (view === 'movie') {
+        entries = (await api('/watchlist?show=all')).entries
+      } else if (view === 'all') {
+        entries = (await api('/entries?limit=50')).entries
+      } else {
+        entries = (await api('/entries?limit=50&kind=' + view)).entries
+      }
+      renderFeed(entries, focusId)
+    } catch (err) {
+      feed.innerHTML = '<div class="empty">' + esc(err.message) + '</div>'
+    }
+  }
+
+  function renderFeed(entries, focusId) {
+    const feed = $('feed')
+    if (!entries.length) {
+      feed.innerHTML = '<div class="empty">' + ($('search').value.trim() ? 'nothing matches' : 'nothing here yet') + '</div>'
+      return
+    }
+    feed.innerHTML = ''
+    for (const e of entries) feed.append(entryEl(e))
+    if (focusId) {
+      const el = feed.querySelector('[data-id^="' + focusId + '"]')
+      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.querySelector('.head').click() }
+    }
+  }
+
+  const DONE = ['watched', 'done', 'read', 'dropped', 'abandoned', 'cancelled']
+
+  function entryEl(e) {
+    const el = document.createElement('div')
+    el.className = 'entry'
+    el.dataset.id = e.id
+
+    const bits = []
+    if (e.rating != null) bits.push(e.rating + '/10')
+    if (e.remind_at) bits.push('⏰ ' + e.remind_at.slice(0, 10))
+    const when = (e.occurred_at || e.created_at || '').slice(0, 10)
+
+    // url and summary get their own treatment; the rest is a plain key: value line
+    const d = e.data || {}
+    const url = typeof d.url === 'string' ? d.url : null
+    const summary = typeof d.summary === 'string' ? d.summary : null
+    const data = Object.entries(d).filter(([k, v]) => v !== null && v !== '' && k !== 'url' && k !== 'summary')
+      .map(([k, v]) => k + ': ' + (typeof v === 'object' ? JSON.stringify(v) : v)).join('  ·  ')
+
+    // search results arrive with **bold** fragments around the matched words
+    const bodyHtml = e.snippet
+      ? esc(e.snippet.replace(/\s+/g, ' ')).replace(/\*\*(.+?)\*\*/g, '<mark>$1</mark>')
+      : esc(e.body || '')
+
+    el.innerHTML =
+      '<div class="head">' +
+        '<span class="kind">' + esc(e.kind) + '</span>' +
+        '<span class="title">' + esc(e.title || '(untitled)') + '</span>' +
+        (e.status ? '<span class="status' + (DONE.includes(e.status) ? ' done' : '') + '">' + esc(e.status) + '</span>' : '') +
+        '<span class="kind">' + when + '</span>' +
+      '</div>' +
+      (bodyHtml ? '<div class="body">' + bodyHtml + '</div>' : '') +
+      (summary ? '<div class="summary">' + esc(summary) + '</div>' : '') +
+      (url ? '<a class="link" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' +
+             esc(url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')) + ' ↗</a>' : '') +
+      (data ? '<div class="data">' + esc(data) + '</div>' : '') +
+      ((e.tags || []).length || bits.length
+        ? '<div class="tags">' + (e.tags || []).map((t) => '#' + esc(t)).join(' ') + (bits.length ? '  ' + bits.join('  ') : '') + '</div>'
+        : '')
+
+    el.querySelector('.head').onclick = () => toggle(el, e)
+    return el
+  }
+
+  async function toggle(el, e) {
+    const existing = el.querySelector('.detail')
+    if (existing) { existing.remove(); el.classList.remove('open'); openId = null; return }
+    for (const d of document.querySelectorAll('.detail')) { d.remove(); d.closest('.entry')?.classList.remove('open') }
+    el.classList.add('open'); openId = e.id
+
+    const detail = document.createElement('div')
+    detail.className = 'detail'
+    detail.innerHTML = '<div class="spin">…</div>'
+    el.append(detail)
+
+    let full
+    try { full = await api('/entries/' + e.id) }
+    catch (err) { detail.innerHTML = '<div class="empty">' + esc(err.message) + '</div>'; return }
+
+    const notes = (full.notes || []).map((n) =>
+      '<div class="note"><time>' + n.created_at.slice(0, 10) + '</time> — ' + esc(n.body) + '</div>').join('')
+    const links = (full.links || []).map((l) =>
+      '<div class="note">' + (l.direction === 'out' ? '→ ' : '← ') + esc(l.rel) + ': ' + esc(l.entry.title || 'untitled') + '</div>').join('')
+
+    const isDone = DONE.includes(full.status)
+    const doneLabel = full.kind === 'movie' ? 'watched' : full.kind === 'reading' ? 'read' : 'done'
+
+    detail.innerHTML = notes + links +
+      '<form class="noteform"><input type="text" placeholder="add a thought…" /><button type="submit">add</button></form>' +
+      '<div class="acts">' +
+        (isDone ? '' : '<button data-act="done">mark ' + doneLabel + '</button>') +
+        '<button data-act="archive">archive</button>' +
+        '<button data-act="delete">delete</button>' +
+      '</div>'
+
+    detail.querySelector('.noteform').onsubmit = async (ev) => {
+      ev.preventDefault()
+      const input = detail.querySelector('input')
+      const body = input.value.trim()
+      if (!body) return
+      input.disabled = true
+      try {
+        await api('/entries/' + e.id + '/notes', { method: 'POST', body: JSON.stringify({ body }) })
+        input.value = ''
+        detail.remove(); el.classList.remove('open'); toggle(el, e)
+      } catch (err) { alert(err.message) } finally { input.disabled = false }
+    }
+
+    for (const b of detail.querySelectorAll('[data-act]')) {
+      b.onclick = async () => {
+        const act = b.dataset.act
+        if (act === 'delete' && !confirm('Delete "' + (full.title || 'this entry') + '" permanently?')) return
+        try {
+          if (act === 'delete') await api('/entries/' + e.id, { method: 'DELETE' })
+          else if (act === 'archive') await api('/entries/' + e.id, { method: 'PATCH', body: JSON.stringify({ archived: true }) })
+          else await api('/entries/' + e.id, { method: 'PATCH', body: JSON.stringify({ status: doneLabel }) })
+          load()
+          api('/stats').then(renderStats).catch(() => {})
+        } catch (err) { alert(err.message) }
+      }
+    }
+  }
+
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+  }
+
+  // --- boot -----------------------------------------------------------------
+  if (token) {
+    unlock(token).catch(() => lock())
+  } else {
+    $('token').focus()
+  }
+})()
+</script>
+</body>
+</html>
