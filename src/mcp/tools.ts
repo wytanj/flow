@@ -308,6 +308,28 @@ export function createFlowServer(): McpServer {
   )
 
   server.registerTool(
+    'flow_rename_shelf',
+    {
+      title: 'Rename a shelf',
+      description:
+        'Rename a shelf (tag) across every entry carrying it. Renaming onto an existing shelf ' +
+        'merges the two. Use when the user wants a shelf called something else.',
+      inputSchema: {
+        from: z.string().describe('The shelf as it is now'),
+        to: z.string().describe('What it should be called'),
+      },
+    },
+    guard(async ({ from, to }) => {
+      const moved = await flow.renameShelf(from, to)
+      return text(
+        moved.length
+          ? `Renamed "${from}" to "${to}" on ${moved.length} ${moved.length === 1 ? 'entry' : 'entries'}:\n${formatList(moved)}`
+          : `No entries are on a shelf called "${from}".`,
+      )
+    }),
+  )
+
+  server.registerTool(
     'flow_delete',
     {
       title: 'Delete an entry',

@@ -173,6 +173,12 @@ export function createApp(): Hono {
   app.get('/briefing', async (c) => c.json(await flow.briefing()))
   app.get('/stats', async (c) => c.json(await flow.stats()))
   app.get('/shelves', async (c) => c.json({ shelves: await flow.shelves() }))
+
+  app.patch('/shelves/:tag', async (c) => {
+    const { to } = await body(c, z.object({ to: z.string().min(1) }))
+    const moved = await flow.renameShelf(c.req.param('tag'), to)
+    return c.json({ renamed: moved.length, entries: moved })
+  })
   app.get('/embeddings', async (c) => c.json(await embeddingStatus()))
 
   // --- model-backed --------------------------------------------------------

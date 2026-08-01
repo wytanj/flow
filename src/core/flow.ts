@@ -540,6 +540,30 @@ export async function open(kind: string, limit = 50): Promise<Entry[]> {
   )
 }
 
+/**
+ * Renames a shelf everywhere at once. Merging into an existing shelf is fine —
+ * duplicates are collapsed rather than rejected.
+ *
+ * Note this bumps `updated_at` on every entry touched (the tag change refreshes
+ * the search vector), so their embeddings go stale and the next sync re-embeds
+ * them. That is correct: the tag is part of what gets embedded.
+ */
+export async function renameShelf(from: string, to: string): Promise<Entry[]> {
+  const [oldTag] = cleanTags([from])
+  const [newTag] = cleanTags([to])
+  if (!oldTag || !newTag) throw new Error('Both the old and new shelf names are required.')
+  if (oldTag === newTag) return []
+
+  return q<Entry>(
+    `update flow.entries
+        set tags = (select coalesce(array_agg(distinct t), '{}')
+                      from unnest(array_replace(tags, $1, $2)) as t)
+      where $1 = any(tags)
+      returning ${COLS}`,
+    [oldTag, newTag],
+  )
+}
+
 /** Every shelf, with what is on it. Tags are how things group in flow. */
 export async function shelves(): Promise<{ tag: string; count: number }[]> {
   return q<{ tag: string; count: number }>(
